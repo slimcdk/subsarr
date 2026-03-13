@@ -275,8 +275,6 @@ $RECYCLE.BIN/
 
 
 pb_data/
-pb_migrations/*.go
-!pb_migrations/main.go
 
 *.log
 *.tmp
