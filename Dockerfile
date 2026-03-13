@@ -19,7 +19,7 @@ RUN CGO_ENABLED=1 GOOS=linux \
     -o subsarr ./main.go
 
 # ── Runtime ────────────────────────────────────────────────────────────────────
-FROM alpine:3.21
+FROM alpine:3.23
 
 RUN apk add --no-cache ca-certificates tzdata
 
