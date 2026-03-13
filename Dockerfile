@@ -1,5 +1,5 @@
 # ── Build ──────────────────────────────────────────────────────────────────────
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # CGO is required for mattn/go-sqlite3 (FTS5 + STAT4 + SPELLFIX1 + REGEXP).
 RUN apk add --no-cache gcc musl-dev
