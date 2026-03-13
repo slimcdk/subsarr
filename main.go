@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 	"github.com/slimcdk/subsarr/cmd/importcmd"
 	"github.com/slimcdk/subsarr/internal/handlers"
@@ -16,8 +17,18 @@ func main() {
 		DBConnect: sqlitedriver.Connect,
 	})
 
-	// Always automigrate — migrations are idempotent and this ensures the schema
-	// is ready whether the binary is invoked as "serve" or "import-dump".
+	// Run app migrations (pb_migrations/) on every bootstrap so the schema is
+	// always up-to-date regardless of which subcommand is invoked.
+	// migratecmd.Automigrate only watches for collection changes to generate
+	// migration files — it does NOT apply them.
+	app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
+		if err := e.Next(); err != nil {
+			return err
+		}
+		return app.RunAppMigrations()
+	})
+
+	// Register the migrate CLI command and collection-change automigration.
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
 		Automigrate: true,
 	})

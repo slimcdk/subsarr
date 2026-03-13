@@ -98,11 +98,6 @@ Manual V1 (from already-extracted metadata.json + subtitles/ directory):
 Manual V2 (from already-extracted Subscene Files DB/ directory):
   subsarr import-dump --files-db "/path/to/Subscene Files DB/"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Bootstrap only applies system migrations; app migrations must be
-			// run explicitly for non-serve commands.
-			if err := app.RunAppMigrations(); err != nil {
-				return fmt.Errorf("failed to apply migrations: %w", err)
-			}
 			// Suppress SQL logging — subtitle content is tens of KB per record
 			// and floods the output. PocketBase auto-enables SQL logging when
 			// run via "go run" (dev mode).
