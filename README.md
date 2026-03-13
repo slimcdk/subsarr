@@ -1,5 +1,9 @@
 # Subsarr
 
+[![Build](https://github.com/slimcdk/subsarr/actions/workflows/docker-build.yml/badge.svg)](https://github.com/slimcdk/subsarr/actions/workflows/docker-build.yml)
+[![GHCR](https://img.shields.io/badge/ghcr.io-slimcdk%2Fsubsarr-blue?logo=docker)](https://github.com/slimcdk/subsarr/pkgs/container/subsarr)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 [Subscene](https://subscene.com) shut down in 2023, taking millions of community subtitles with it. subsarr lets you self-host the full Subscene archive and use it as a subtitle source in [Bazarr](https://www.bazarr.media) — so your media server can automatically find and download subtitles without depending on any external service.
 
 It imports the community-preserved Subscene V2 dump (~2.7 million entries) into a local database and exposes a search API that Bazarr can query by IMDB ID, title, language, season/episode, and more.
