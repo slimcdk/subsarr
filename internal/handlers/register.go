@@ -14,8 +14,6 @@ func Register(app *pocketbase.PocketBase) {
 		api.GET("/languages", NewLanguagesHandler(app))
 		api.GET("/subtitles/search", NewSearchHandler(app))
 		api.GET("/subtitles/{id}/download", NewDownloadHandler(app))
-		api.POST("/import", NewImportHandler(app))
-		api.GET("/import/status", NewImportStatusHandler(app))
 
 		return se.Next()
 	})

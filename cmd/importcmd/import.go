@@ -82,27 +82,6 @@ func suppressSQLLogging(app *pocketbase.PocketBase) {
 
 // MustRegister adds the import-dump cobra command to the PocketBase root command.
 func MustRegister(app *pocketbase.PocketBase) {
-	// Suppress SQL logging for the import command both during and after
-	// bootstrap. We check os.Args so other commands are unaffected.
-	if len(os.Args) > 1 && os.Args[1] == "import-dump" {
-		app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
-			if err := e.Next(); err != nil {
-				return err
-			}
-			// Bootstrap only runs system migrations automatically; app migrations
-			// (our pb_migrations/ files) must be applied explicitly for non-serve
-			// commands.
-			if err := app.RunAppMigrations(); err != nil {
-				return err
-			}
-			// Always suppress SQL logging — subtitle content is tens of KB per
-			// record and floods the output. PocketBase auto-enables dev mode (and
-			// therefore SQL logging) when run via "go run".
-			suppressSQLLogging(app)
-			return nil
-		})
-	}
-
 	cmd := &cobra.Command{
 		Use:   "import-dump",
 		Short: "Import a Subscene dump into the database",
@@ -119,6 +98,16 @@ Manual V1 (from already-extracted metadata.json + subtitles/ directory):
 Manual V2 (from already-extracted Subscene Files DB/ directory):
   subsarr import-dump --files-db "/path/to/Subscene Files DB/"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Bootstrap only applies system migrations; app migrations must be
+			// run explicitly for non-serve commands.
+			if err := app.RunAppMigrations(); err != nil {
+				return fmt.Errorf("failed to apply migrations: %w", err)
+			}
+			// Suppress SQL logging — subtitle content is tens of KB per record
+			// and floods the output. PocketBase auto-enables SQL logging when
+			// run via "go run" (dev mode).
+			suppressSQLLogging(app)
+
 			archive, _ := cmd.Flags().GetString("archive")
 			metaPath, _ := cmd.Flags().GetString("metadata")
 			subsDir, _ := cmd.Flags().GetString("subtitles")

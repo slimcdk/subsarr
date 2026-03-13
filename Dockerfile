@@ -31,9 +31,9 @@ COPY --from=builder /build/subsarr .
 VOLUME ["/app/pb_data"]
 
 # Mount point for dump archives when running the import command:
-#   docker run --rm -v /host/dumps:/dumps subsarr \
-#     import-dump --archive /dumps/Subscene\ V2.7z.001
-VOLUME ["/dumps"]
+#   docker run --rm -v /path/to/subscene/archive:/tmp/subscene-archive subsarr \
+#     import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
+VOLUME ["/tmp/subscene-archive"]
 
 EXPOSE 8090
 

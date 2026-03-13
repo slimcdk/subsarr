@@ -24,15 +24,15 @@ This is a one-time step. The import streams directly from the archive and takes 
 ```bash
 docker run --rm \
   -v /srv/subsarr/pb_data:/app/pb_data \
-  -v /srv/subsarr/dumps:/dumps \
+  -v /path/to/subscene/archive:/tmp/subscene-archive \
   ghcr.io/slimcdk/subsarr:latest \
-  import-dump --archive "/dumps/Subscene V2.7z.001"
+  import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
 ```
 
 Progress is printed to stdout:
 
 ```
-[import] opening archive /dumps/Subscene V2.7z.001 …
+[import] opening archive /tmp/subscene-archive/Subscene V2.7z.001 …
 [import] archive has 2706833 entries across volumes: [...]
 [import] detected format: v2
 [import] 10000 processed  9987 imported  0 skipped  13 errors  (312/s)

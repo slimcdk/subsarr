@@ -1,6 +1,6 @@
 {
-  "name": "subarr",
-  "image": "mcr.microsoft.com/devcontainers/go:2-1.25-bookworm",
+  "name": "subsarr",
+  "image": "mcr.microsoft.com/devcontainers/go:2-1.26-bookworm",
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "postCreateCommand": "go mod download",
