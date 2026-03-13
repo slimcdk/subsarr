@@ -1,0 +1,60 @@
+{
+  "name": "subarr",
+  "image": "mcr.microsoft.com/devcontainers/go:2-1.25-bookworm",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "postCreateCommand": "go mod download",
+  "forwardPorts": [
+    8090
+  ],
+  "portsAttributes": {
+    "8090": {
+      "label": "PocketBase",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "ms-vscode.makefile-tools",
+        "humao.rest-client",
+        "mtxr.sqliteviewer",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker",
+        "GitHub.vscode-github-actions",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "eamodio.gitlens",
+        "shardulm94.trailing-spaces",
+        "google.geminicodeassist",
+        "Anthropic.claude-code"
+      ],
+      "settings": {
+        "go.toolsManagement.checkForUpdates": "local",
+        "go.useLanguageServer": true,
+        "go.gopath": "/go",
+        "go.goroot": "/usr/local/go",
+        "go.toolsManagement.autoUpdate": false,
+        "go.lintTool": "golangci-lint",
+        "go.formatTool": "goimports",
+        "editor.formatOnSave": true,
+        "[go]": {
+          "editor.defaultFormatter": "golang.go",
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "files.watcherExclude": {
+          "**/pb_data/**": true
+        }
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/dhoeric/features/act:1": {},
+    "ghcr.io/azutake/devcontainer-features/go-packages-install:0": {},
+    "ghcr.io/devcontainers-extra/features/apt-packages:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+}
