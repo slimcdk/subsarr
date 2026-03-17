@@ -1,0 +1,59 @@
+# Infrastructure for testing all DB + storage combinations.
+# Usage:
+#   docker compose -f docker-compose.test.yaml up -d
+#   ./test-import.sh
+#   docker compose -f docker-compose.test.yaml down -v
+
+volumes:
+  pg-data:
+  mariadb-data:
+  seaweedfs-data:
+
+services:
+
+  # ── S3-compatible storage: SeaweedFS ───────────────────────────────────────
+  seaweedfs:
+    image: chrislusf/seaweedfs
+    command: "server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data"
+    ports:
+      - "8333:8333"   # S3 API
+    volumes:
+      - seaweedfs-data:/data
+      - ./testdata/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9333/cluster/status"]
+      interval: 3s
+      retries: 10
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: subsarr
+      POSTGRES_USER: subsarr
+      POSTGRES_PASSWORD: subsarr
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U subsarr"]
+      interval: 3s
+      retries: 10
+
+  # ── MariaDB ────────────────────────────────────────────────────────────────
+  mariadb:
+    image: mariadb:11
+    ports:
+      - "3306:3306"
+    environment:
+      MARIADB_DATABASE: subsarr
+      MARIADB_USER: subsarr
+      MARIADB_PASSWORD: subsarr
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      retries: 10

@@ -1,11 +1,9 @@
-package handlers
+package server
 
 import (
 	"net/url"
 	"testing"
 )
-
-// ─── requestBaseURL ───────────────────────────────────────────────────────────
 
 func TestRequestBaseURL(t *testing.T) {
 	tests := []struct {
@@ -16,11 +14,8 @@ func TestRequestBaseURL(t *testing.T) {
 	}{
 		{"http://example.com/path", "example.com", false, "http://example.com"},
 		{"http://example.com/path", "example.com", true, "https://example.com"},
-		// Host header takes precedence when url.Host is empty
 		{"", "myhost:8090", false, "http://myhost:8090"},
-		// url.Host overrides host parameter when set
 		{"http://fromurl.com/api", "ignored", false, "http://fromurl.com"},
-		// https scheme in URL → https even without TLS flag
 		{"https://secure.example.com/api", "secure.example.com", false, "https://secure.example.com"},
 	}
 
@@ -33,8 +28,6 @@ func TestRequestBaseURL(t *testing.T) {
 		}
 	}
 }
-
-// ─── intParam ─────────────────────────────────────────────────────────────────
 
 func TestIntParam(t *testing.T) {
 	tests := []struct {
@@ -57,8 +50,6 @@ func TestIntParam(t *testing.T) {
 		}
 	}
 }
-
-// ─── clamp ────────────────────────────────────────────────────────────────────
 
 func TestClamp(t *testing.T) {
 	tests := []struct {

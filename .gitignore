@@ -275,6 +275,7 @@ $RECYCLE.BIN/
 
 
 pb_data/
+data/
 
 *.log
 *.tmp
@@ -282,7 +283,7 @@ pb_data/
 *.db-shm
 *.db-wal
 
-subscene-service
+subsarr
 /dist/
 
 .env

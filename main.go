@@ -2,44 +2,59 @@ package main
 
 import (
 	"log"
+	"net/http"
+	"os"
 
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 	"github.com/slimcdk/subsarr/cmd/importcmd"
-	"github.com/slimcdk/subsarr/internal/handlers"
-	"github.com/slimcdk/subsarr/internal/sqlitedriver"
-	_ "github.com/slimcdk/subsarr/pb_migrations"
+	"github.com/slimcdk/subsarr/internal/config"
+	"github.com/slimcdk/subsarr/internal/database"
+	"github.com/slimcdk/subsarr/internal/server"
+	"github.com/slimcdk/subsarr/internal/storage"
+	"github.com/slimcdk/subsarr/internal/store"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	app := pocketbase.NewWithConfig(pocketbase.Config{
-		DBConnect: sqlitedriver.Connect,
-	})
+	cfg := config.Load()
 
-	// Run app migrations (pb_migrations/) on every bootstrap so the schema is
-	// always up-to-date regardless of which subcommand is invoked.
-	// migratecmd.Automigrate only watches for collection changes to generate
-	// migration files — it does NOT apply them.
-	app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
-		if err := e.Next(); err != nil {
-			return err
-		}
-		return app.RunAppMigrations()
-	})
+	root := &cobra.Command{
+		Use:   "subsarr",
+		Short: "Self-hosted Subscene subtitle provider",
+	}
 
-	// Register the migrate CLI command and collection-change automigration.
-	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
-		Automigrate: true,
-	})
+	serve := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the HTTP server",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			db, err := database.Open(cfg.DBDriver, cfg.DBDSN)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
 
-	// Register custom REST routes.
-	handlers.Register(app)
+			if err := database.Migrate(db, cfg.DBDriver); err != nil {
+				return err
+			}
 
-	// Register the CLI import command.
-	importcmd.MustRegister(app)
+			st, err := store.New(db, cfg.DBDriver)
+			if err != nil {
+				return err
+			}
 
-	if err := app.Start(); err != nil {
-		log.Fatal(err)
+			stor, err := storage.New(cfg)
+			if err != nil {
+				return err
+			}
+
+			srv := server.New(st, stor)
+			log.Printf("listening on %s (driver=%s)", cfg.Listen, cfg.DBDriver)
+			return http.ListenAndServe(cfg.Listen, srv.Routes())
+		},
+	}
+
+	root.AddCommand(serve, importcmd.NewCommand(cfg))
+
+	if err := root.Execute(); err != nil {
+		os.Exit(1)
 	}
 }

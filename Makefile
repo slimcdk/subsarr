@@ -8,11 +8,11 @@ SQLITE3_DIR := $(shell go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)
 ## build: compile the binary
 build:
 	CGO_ENABLED=1 CGO_CFLAGS="-I$(SQLITE3_DIR)" \
-	go build -tags "sqlite_fts5 sqlite_stat4 no_default_driver" -ldflags="-s -w" -o $(BINARY) ./main.go
+	go build -tags "sqlite_fts5 sqlite_stat4" -ldflags="-s -w" -o $(BINARY) ./main.go
 
 ## run: run the server directly
 run: build
-	./$(BINARY) serve --http=0.0.0.0:8090 --dev
+	./$(BINARY) serve
 
 ## lint: run golangci-lint
 lint:
@@ -21,12 +21,12 @@ lint:
 ## test: run tests
 test:
 	CGO_ENABLED=1 CGO_CFLAGS="-I$(SQLITE3_DIR)" \
-	go test -tags "sqlite_fts5 sqlite_stat4 no_default_driver" ./... -v -count=1
+	go test -tags "sqlite_fts5 sqlite_stat4" ./... -v -count=1
 
-## clean: remove build artefacts and PocketBase data
+## clean: remove build artefacts and data
 clean:
 	rm -f $(BINARY)
-	rm -rf tmp/ pb_data/
+	rm -rf tmp/ data/
 
 ## docker-build: build the production Docker image locally
 docker-build:

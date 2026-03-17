@@ -183,27 +183,6 @@ func TestParseDate(t *testing.T) {
 	}
 }
 
-// ─── isUniqueErr ─────────────────────────────────────────────────────────────
-
-func TestIsUniqueErr(t *testing.T) {
-	tests := []struct {
-		msg  string
-		want bool
-	}{
-		{"UNIQUE constraint failed: subtitles.subscene_id", true},
-		{"Value must be unique", true},
-		{"some other error", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		got := isUniqueErr(tt.msg)
-		if got != tt.want {
-			t.Errorf("isUniqueErr(%q) = %v, want %v", tt.msg, got, tt.want)
-		}
-	}
-}
-
 // ─── extractSubtitlesFromZIPBytes ────────────────────────────────────────────
 
 func makeZIP(t *testing.T, files map[string]string) []byte {

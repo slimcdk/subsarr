@@ -1,13 +1,8 @@
-// Package importcmd provides a CLI command to import Subscene subtitle dumps
-// into the PocketBase database.
+// Package importcmd provides a CLI command to import Subscene subtitle dumps.
 //
 // # One-shot streaming from archive (no extraction to disk)
 //
 //	./subsarr import-dump --archive "/path/to/Subscene V2.7z.001"
-//
-// The command opens the split 7z archive in streaming mode using a pure-Go
-// reader (github.com/bodgit/sevenzip), auto-detects the dump format (V1 or V2),
-// and imports records directly — no temporary files, no extra disk space needed.
 //
 // # Manual V1 — "Subscene Final" (extracted metadata.json + subtitles/ dir)
 //
@@ -22,6 +17,7 @@ package importcmd
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -35,10 +31,11 @@ import (
 	"time"
 
 	"github.com/bodgit/sevenzip"
-	"github.com/pocketbase/dbx"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/google/uuid"
+	"github.com/slimcdk/subsarr/internal/config"
+	"github.com/slimcdk/subsarr/internal/database"
+	"github.com/slimcdk/subsarr/internal/storage"
+	"github.com/slimcdk/subsarr/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -66,22 +63,8 @@ type subFile struct {
 	content  []byte
 }
 
-// suppressSQLLogging nulls out the dbx query/exec log funcs on every DB
-// connection so the import output is not flooded with SQL statements.
-func suppressSQLLogging(app *pocketbase.PocketBase) {
-	for _, b := range []dbx.Builder{
-		app.ConcurrentDB(), app.NonconcurrentDB(),
-		app.AuxConcurrentDB(), app.AuxNonconcurrentDB(),
-	} {
-		if db, ok := b.(*dbx.DB); ok {
-			db.QueryLogFunc = nil
-			db.ExecLogFunc = nil
-		}
-	}
-}
-
-// MustRegister adds the import-dump cobra command to the PocketBase root command.
-func MustRegister(app *pocketbase.PocketBase) {
+// NewCommand creates the import-dump cobra command.
+func NewCommand(cfg config.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import-dump",
 		Short: "Import a Subscene dump into the database",
@@ -98,14 +81,25 @@ Manual V1 (from already-extracted metadata.json + subtitles/ directory):
 Manual V2 (from already-extracted Subscene Files DB/ directory):
   subsarr import-dump --files-db "/path/to/Subscene Files DB/"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := app.Bootstrap(); err != nil {
-				return fmt.Errorf("bootstrap: %w", err)
+			db, err := database.Open(cfg.DBDriver, cfg.DBDSN)
+			if err != nil {
+				return fmt.Errorf("open database: %w", err)
+			}
+			defer db.Close()
+
+			if err := database.Migrate(db, cfg.DBDriver); err != nil {
+				return fmt.Errorf("migrate: %w", err)
 			}
 
-			// Suppress SQL logging — subtitle content is tens of KB per record
-			// and floods the output. PocketBase auto-enables SQL logging when
-			// run via "go run" (dev mode).
-			suppressSQLLogging(app)
+			st, err := store.New(db, cfg.DBDriver)
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+
+			stor, err := storage.New(cfg)
+			if err != nil {
+				return fmt.Errorf("storage: %w", err)
+			}
 
 			archive, _ := cmd.Flags().GetString("archive")
 			metaPath, _ := cmd.Flags().GetString("metadata")
@@ -116,11 +110,11 @@ Manual V2 (from already-extracted Subscene Files DB/ directory):
 
 			switch {
 			case archive != "":
-				return runFromArchive(app, archive, batchSize, limit)
+				return runFromArchive(st, stor, archive, batchSize, limit)
 			case filesDB != "":
-				return runV2(app, filesDB, batchSize, limit)
+				return runV2(st, stor, filesDB, batchSize, limit)
 			case metaPath != "":
-				return runV1(app, metaPath, subsDir, batchSize, limit)
+				return runV1(st, stor, metaPath, subsDir, batchSize, limit)
 			default:
 				return fmt.Errorf("provide --archive, --metadata (V1), or --files-db (V2)")
 			}
@@ -134,19 +128,12 @@ Manual V2 (from already-extracted Subscene Files DB/ directory):
 	cmd.Flags().Int("batch", 500, "Records per DB transaction")
 	cmd.Flags().Int("limit", 0, "Stop after this many source entries (0 = all)")
 
-	app.RootCmd.AddCommand(cmd)
+	return cmd
 }
 
 // ─── streaming from archive ───────────────────────────────────────────────────
 
-// runFromArchive opens the split 7z archive with a pure-Go reader, detects
-// the dump format and imports without extracting to disk.
-func runFromArchive(app *pocketbase.PocketBase, archivePath string, batchSize, limit int) error {
-	col, err := app.FindCollectionByNameOrId("subtitles")
-	if err != nil {
-		return fmt.Errorf("collection 'subtitles' not found – run migrations first: %w", err)
-	}
-
+func runFromArchive(st store.Store, stor storage.Store, archivePath string, batchSize, limit int) error {
 	log.Printf("[import] opening archive %s …", archivePath)
 	r, err := sevenzip.OpenReader(archivePath)
 	if err != nil {
@@ -156,22 +143,19 @@ func runFromArchive(app *pocketbase.PocketBase, archivePath string, batchSize, l
 
 	log.Printf("[import] archive has %d entries across volumes: %v", len(r.File), r.Volumes())
 
-	// Detect format by scanning the file list (no decompression needed).
 	format := detectArchiveFormat(r)
 	log.Printf("[import] detected format: %s", format)
 
 	switch format {
 	case "v1":
-		return streamV1(app, r, col, batchSize, limit)
+		return streamV1(st, stor, r, batchSize, limit)
 	case "v2":
-		return streamV2(app, r, col, batchSize, limit)
+		return streamV2(st, stor, r, batchSize, limit)
 	default:
 		return fmt.Errorf("unrecognised archive layout — expected metadata.json (V1) or 'Subscene Files DB/' (V2)")
 	}
 }
 
-// detectArchiveFormat scans the archive's file list (headers only, no I/O) to
-// determine whether it is a V1 or V2 dump.
 func detectArchiveFormat(r *sevenzip.ReadCloser) string {
 	for _, f := range r.File {
 		base := filepath.Base(f.Name)
@@ -185,10 +169,8 @@ func detectArchiveFormat(r *sevenzip.ReadCloser) string {
 	return "unknown"
 }
 
-// streamV2 iterates the archive file list and, for every ZIP that lives under
-// "Subscene Files DB/{slug}/", reads it in memory and inserts subtitle records.
-func streamV2(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Collection, batchSize, limit int) error {
-	imp := newImporter(app, col, batchSize)
+func streamV2(st store.Store, stor storage.Store, r *sevenzip.ReadCloser, batchSize, limit int) error {
+	imp := newImporter(st, stor, batchSize)
 	defer imp.flush()
 
 	total := len(r.File)
@@ -209,7 +191,6 @@ func streamV2(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 
 		imp.total++
 
-		// path: …/Subscene Files DB/{slug}/{slug}[_HI]_{lang}-{id}.zip
 		slug := filepath.Base(filepath.Dir(f.Name))
 		filename := filepath.Base(f.Name)
 		subsceneID, language, hi := parseV2Filename(slug, filename)
@@ -232,24 +213,24 @@ func streamV2(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 
 		files := extractSubtitlesFromZIPBytes(data)
 		if len(files) == 0 {
-			// Empty or unreadable ZIP — store a metadata-only record so the
-			// entry is still searchable even without subtitle content.
 			files = []subFile{{filename: filename, format: "zip"}}
 		}
 
 		title := slugToTitle(slug)
 		for _, sf := range files {
-			rec := core.NewRecord(col)
-			rec.Set("subscene_id", subsceneID)
-			rec.Set("title", title)
-			rec.Set("slug", slug)
-			rec.Set("language", language)
-			rec.Set("hi", hi)
-			rec.Set("filename", sf.filename)
-			rec.Set("format", sf.format)
-			setContent(rec, sf)
-			rec.Set("downloads", 0)
-			imp.add(rec)
+			sub := &store.Subtitle{
+				ID:         uuid.NewString(),
+				SubsceneID: subsceneID,
+				Title:      title,
+				Slug:       slug,
+				Language:   language,
+				HI:         hi,
+				Filename:   sf.filename,
+				Format:     sf.format,
+				Downloads:  0,
+			}
+			imp.storeContent(sub, sf)
+			imp.add(sub)
 		}
 
 		if i%5_000 == 0 {
@@ -261,11 +242,7 @@ func streamV2(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 	return nil
 }
 
-// streamV1 does two passes over the archive:
-//  1. Read metadata.json and build an in-memory lookup map.
-//  2. Iterate ZIPs in subtitles/, enriching each record with the map.
-func streamV1(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Collection, batchSize, limit int) error {
-	// Pass 1 — build metadata map.
+func streamV1(st store.Store, stor storage.Store, r *sevenzip.ReadCloser, batchSize, limit int) error {
 	log.Printf("[import] V1 pass 1/2: loading metadata.json …")
 	meta, err := loadV1Metadata(r)
 	if err != nil {
@@ -273,8 +250,7 @@ func streamV1(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 	}
 	log.Printf("[import] loaded %d metadata entries", len(meta))
 
-	// Pass 2 — import ZIPs.
-	imp := newImporter(app, col, batchSize)
+	imp := newImporter(st, stor, batchSize)
 	defer imp.flush()
 
 	for _, f := range r.File {
@@ -289,10 +265,9 @@ func streamV1(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 		}
 		imp.total++
 
-		zipName := filepath.Base(f.Name) // e.g. "loki-second-season_greek-3193694.zip"
+		zipName := filepath.Base(f.Name)
 		entry, ok := meta[zipName]
 		if !ok {
-			// fallback: infer from filename alone
 			entry.Language = "unknown"
 		}
 
@@ -314,25 +289,29 @@ func streamV1(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 			files = []subFile{{filename: zipName, format: strings.TrimPrefix(ext, ".")}}
 		}
 
+		releasesJSON, _ := json.Marshal(entry.Releases)
+
 		for _, sf := range files {
-			rec := core.NewRecord(col)
-			rec.Set("subscene_id", entry.SubsceneID)
-			rec.Set("title", title)
-			rec.Set("slug", slug)
-			rec.Set("imdb_id", imdbID)
-			rec.Set("language", entry.Language)
-			rec.Set("hi", hi)
-			rec.Set("author", entry.Author)
-			rec.Set("releases", entry.Releases)
-			rec.Set("comment", entry.Comment)
-			rec.Set("filename", sf.filename)
-			rec.Set("format", sf.format)
-			setContent(rec, sf)
-			rec.Set("downloads", 0)
-			if !uploadedAt.IsZero() {
-				rec.Set("uploaded_at", uploadedAt)
+			sub := &store.Subtitle{
+				ID:         uuid.NewString(),
+				SubsceneID: entry.SubsceneID,
+				Title:      title,
+				Slug:       slug,
+				ImdbID:     imdbID,
+				Language:   entry.Language,
+				HI:         hi,
+				Author:     entry.Author,
+				Releases:   string(releasesJSON),
+				Comment:    entry.Comment,
+				Filename:   sf.filename,
+				Format:     sf.format,
+				Downloads:  0,
 			}
-			imp.add(rec)
+			if !uploadedAt.IsZero() {
+				sub.UploadedAt = uploadedAt.Format(time.RFC3339)
+			}
+			imp.storeContent(sub, sf)
+			imp.add(sub)
 		}
 	}
 
@@ -340,8 +319,6 @@ func streamV1(app *pocketbase.PocketBase, r *sevenzip.ReadCloser, col *core.Coll
 	return nil
 }
 
-// loadV1Metadata reads metadata.json from the archive and returns a map keyed
-// by the download filename (e.g. "loki-second-season_greek-3193694.zip").
 func loadV1Metadata(r *sevenzip.ReadCloser) (map[string]metaEntry, error) {
 	for _, f := range r.File {
 		if filepath.Base(f.Name) != "metadata.json" {
@@ -355,7 +332,7 @@ func loadV1Metadata(r *sevenzip.ReadCloser) (map[string]metaEntry, error) {
 
 		m := make(map[string]metaEntry, 3_000_000)
 		dec := json.NewDecoder(rc)
-		if _, err := dec.Token(); err != nil { // consume '['
+		if _, err := dec.Token(); err != nil {
 			return nil, fmt.Errorf("metadata.json is not a JSON array: %w", err)
 		}
 		for dec.More() {
@@ -370,7 +347,6 @@ func loadV1Metadata(r *sevenzip.ReadCloser) (map[string]metaEntry, error) {
 	return nil, fmt.Errorf("metadata.json not found in archive")
 }
 
-// readArchiveFile reads the full content of a sevenzip file entry into memory.
 func readArchiveFile(f *sevenzip.File) ([]byte, error) {
 	rc, err := f.Open()
 	if err != nil {
@@ -382,12 +358,7 @@ func readArchiveFile(f *sevenzip.File) ([]byte, error) {
 
 // ─── manual V1 (extracted) ────────────────────────────────────────────────────
 
-func runV1(app *pocketbase.PocketBase, metaPath, subsDir string, batchSize, limit int) error {
-	col, err := app.FindCollectionByNameOrId("subtitles")
-	if err != nil {
-		return fmt.Errorf("collection 'subtitles' not found – run migrations first: %w", err)
-	}
-
+func runV1(st store.Store, stor storage.Store, metaPath, subsDir string, batchSize, limit int) error {
 	f, err := os.Open(metaPath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", metaPath, err)
@@ -399,7 +370,7 @@ func runV1(app *pocketbase.PocketBase, metaPath, subsDir string, batchSize, limi
 		return fmt.Errorf("metadata.json does not start with '[': %w", err)
 	}
 
-	imp := newImporter(app, col, batchSize)
+	imp := newImporter(st, stor, batchSize)
 	defer imp.flush()
 
 	for dec.More() {
@@ -428,25 +399,29 @@ func runV1(app *pocketbase.PocketBase, metaPath, subsDir string, batchSize, limi
 			files = []subFile{{filename: entry.Download, format: strings.TrimPrefix(ext, ".")}}
 		}
 
+		releasesJSON, _ := json.Marshal(entry.Releases)
+
 		for _, sf := range files {
-			rec := core.NewRecord(col)
-			rec.Set("subscene_id", entry.SubsceneID)
-			rec.Set("title", title)
-			rec.Set("slug", slug)
-			rec.Set("imdb_id", imdbID)
-			rec.Set("language", entry.Language)
-			rec.Set("hi", hi)
-			rec.Set("author", entry.Author)
-			rec.Set("releases", entry.Releases)
-			rec.Set("comment", entry.Comment)
-			rec.Set("filename", sf.filename)
-			rec.Set("format", sf.format)
-			setContent(rec, sf)
-			rec.Set("downloads", 0)
-			if !uploadedAt.IsZero() {
-				rec.Set("uploaded_at", uploadedAt)
+			sub := &store.Subtitle{
+				ID:         uuid.NewString(),
+				SubsceneID: entry.SubsceneID,
+				Title:      title,
+				Slug:       slug,
+				ImdbID:     imdbID,
+				Language:   entry.Language,
+				HI:         hi,
+				Author:     entry.Author,
+				Releases:   string(releasesJSON),
+				Comment:    entry.Comment,
+				Filename:   sf.filename,
+				Format:     sf.format,
+				Downloads:  0,
 			}
-			imp.add(rec)
+			if !uploadedAt.IsZero() {
+				sub.UploadedAt = uploadedAt.Format(time.RFC3339)
+			}
+			imp.storeContent(sub, sf)
+			imp.add(sub)
 		}
 	}
 
@@ -456,16 +431,11 @@ func runV1(app *pocketbase.PocketBase, metaPath, subsDir string, batchSize, limi
 
 // ─── manual V2 (extracted) ────────────────────────────────────────────────────
 
-func runV2(app *pocketbase.PocketBase, filesDBDir string, batchSize, limit int) error {
-	col, err := app.FindCollectionByNameOrId("subtitles")
-	if err != nil {
-		return fmt.Errorf("collection 'subtitles' not found – run migrations first: %w", err)
-	}
-
-	imp := newImporter(app, col, batchSize)
+func runV2(st store.Store, stor storage.Store, filesDBDir string, batchSize, limit int) error {
+	imp := newImporter(st, stor, batchSize)
 	defer imp.flush()
 
-	err = filepath.WalkDir(filesDBDir, func(path string, d fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(filesDBDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d.IsDir() {
 			return walkErr
 		}
@@ -491,17 +461,19 @@ func runV2(app *pocketbase.PocketBase, filesDBDir string, batchSize, limit int) 
 
 		title := slugToTitle(slug)
 		for _, sf := range files {
-			rec := core.NewRecord(col)
-			rec.Set("subscene_id", subsceneID)
-			rec.Set("title", title)
-			rec.Set("slug", slug)
-			rec.Set("language", language)
-			rec.Set("hi", hi)
-			rec.Set("filename", sf.filename)
-			rec.Set("format", sf.format)
-			setContent(rec, sf)
-			rec.Set("downloads", 0)
-			imp.add(rec)
+			sub := &store.Subtitle{
+				ID:         uuid.NewString(),
+				SubsceneID: subsceneID,
+				Title:      title,
+				Slug:       slug,
+				Language:   language,
+				HI:         hi,
+				Filename:   sf.filename,
+				Format:     sf.format,
+				Downloads:  0,
+			}
+			imp.storeContent(sub, sf)
+			imp.add(sub)
 		}
 		return nil
 	})
@@ -513,10 +485,10 @@ func runV2(app *pocketbase.PocketBase, filesDBDir string, batchSize, limit int) 
 // ─── shared importer ─────────────────────────────────────────────────────────
 
 type importer struct {
-	app       *pocketbase.PocketBase
-	col       *core.Collection
+	st        store.Store
+	stor      storage.Store
 	batchSize int
-	batch     []*core.Record
+	batch     []*store.Subtitle
 	total     int
 	imported  int
 	skipped   int
@@ -524,12 +496,12 @@ type importer struct {
 	start     time.Time
 }
 
-func newImporter(app *pocketbase.PocketBase, col *core.Collection, batchSize int) *importer {
-	return &importer{app: app, col: col, batchSize: batchSize, start: time.Now()}
+func newImporter(st store.Store, stor storage.Store, batchSize int) *importer {
+	return &importer{st: st, stor: stor, batchSize: batchSize, start: time.Now()}
 }
 
-func (im *importer) add(rec *core.Record) {
-	im.batch = append(im.batch, rec)
+func (im *importer) add(sub *store.Subtitle) {
+	im.batch = append(im.batch, sub)
 	if len(im.batch) >= im.batchSize {
 		im.flush()
 	}
@@ -544,7 +516,7 @@ func (im *importer) flush() {
 	if len(im.batch) == 0 {
 		return
 	}
-	n, s, e := flushBatch(im.app, im.batch)
+	n, s, e := im.st.InsertSubtitleBatch(context.Background(), im.batch)
 	im.imported += n
 	im.skipped += s
 	im.errCount += e
@@ -552,78 +524,30 @@ func (im *importer) flush() {
 }
 
 func (im *importer) logFinal(mode string) {
-	im.flush() // flush remaining batch before reporting final counts
+	im.flush()
 	log.Printf("[import:%s] done: %d processed  %d imported  %d skipped  %d errors  in %s",
 		mode, im.total, im.imported, im.skipped, im.errCount,
 		time.Since(im.start).Round(time.Second))
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-// flushBatch saves each record individually. Unique-constraint violations are
-// counted as skipped (not errors) since they indicate an already-imported record.
-//
-// Note: a batch transaction was used previously for speed, but FileField records
-// have their *filesystem.File converted to a plain string during tx.Save, so any
-// retry after a transaction rollback would trigger PocketBase's "Invalid new files"
-// validation. Individual saves avoid this entirely.
-//
-// Returns (saved, skipped, errors).
-func flushBatch(app *pocketbase.PocketBase, batch []*core.Record) (saved, skipped, errors int) {
-	for _, rec := range batch {
-		if err := app.Save(rec); err != nil {
-			msg := err.Error()
-			switch {
-			case isUniqueErr(msg):
-				skipped++
-			default:
-				if errors < 3 {
-					log.Printf("[import] save error (slug=%q subscene_id=%q filename=%q language=%q): %s",
-						rec.GetString("slug"), rec.GetString("subscene_id"),
-						rec.GetString("filename"), rec.GetString("language"), msg)
-				}
-				errors++
-			}
-		} else {
-			saved++
-		}
-	}
-	return saved, skipped, errors
-}
-
-// isUniqueErr returns true for any unique-constraint violation — either from
-// PocketBase's validation layer ("Value must be unique") or from SQLite directly
-// ("UNIQUE constraint failed").
-func isUniqueErr(msg string) bool {
-	return strings.Contains(msg, "UNIQUE constraint failed") ||
-		strings.Contains(msg, "Value must be unique")
-}
-
-// maxContentSize is the largest file we'll attach to a subtitle record.
-// ASS subtitles with embedded fonts can be tens of MB; skip content for
-// anything larger so the record is still saved as metadata-only.
+// maxContentSize is the largest file we'll store.
 const maxContentSize = 20 << 20 // 20 MB
 
-// setContent attaches the subtitle file to the record's "content" FileField.
-// Files that exceed maxContentSize are skipped — the record is still saved
-// without content so it remains searchable.
-func setContent(rec *core.Record, sf subFile) {
+// storeContent uploads the subtitle file content to the storage backend
+// and sets the ContentKey on the subtitle record.
+func (im *importer) storeContent(sub *store.Subtitle, sf subFile) {
 	if len(sf.content) == 0 || len(sf.content) > maxContentSize {
 		return
 	}
-	f, err := filesystem.NewFileFromBytes(sf.content, storageFilename(sf.filename))
+	key := fmt.Sprintf("subtitles/%s/%s", sub.ID, storageFilename(sf.filename))
+	err := im.stor.Put(context.Background(), key, bytes.NewReader(sf.content), int64(len(sf.content)))
 	if err == nil {
-		rec.Set("content", f)
+		sub.ContentKey = key
 	}
 }
 
-// storageFilename produces a PocketBase-safe filename from an arbitrary subtitle
-// filename. PocketBase's FileField validation rejects generated names that still
-// contain uppercase letters or hyphens in the extension segment, so we fully
-// normalise both the base and the extension here before handing the name off to
-// filesystem.NewFileFromBytes.
-//
-// The original human-readable name is preserved in the separate "filename" field.
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
 func storageFilename(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	base := strings.ToLower(strings.TrimSuffix(filename, filepath.Ext(filename)))
@@ -635,7 +559,6 @@ func storageFilename(filename string) string {
 	return base + ext
 }
 
-// extractSubtitlesFromZIPBytes opens an in-memory ZIP and returns subtitle files.
 func extractSubtitlesFromZIPBytes(data []byte) []subFile {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -644,7 +567,6 @@ func extractSubtitlesFromZIPBytes(data []byte) []subFile {
 	return subtitlesFromZIPReader(zr)
 }
 
-// extractSubtitlesFromZIPPath opens a ZIP file on disk and returns subtitle files.
 func extractSubtitlesFromZIPPath(path string) []subFile {
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
@@ -681,30 +603,19 @@ func subtitlesFromZIPReader(zr *zip.Reader) []subFile {
 	return files
 }
 
-// parseV2Filename extracts subscene_id, language, and HI flag from a V2 ZIP name.
-//
-// Pattern: {show-slug}[_HI]_{language}-{id}.zip
-//
-// Subscene show-slugs only use dashes, never underscores, so the FIRST
-// underscore reliably separates the show-slug from the language+id portion.
-// The directory slug is accepted as a parameter but unused — the filename
-// alone carries all necessary information.
 func parseV2Filename(_ string, filename string) (subsceneID, language string, hi bool) {
 	base := strings.TrimSuffix(filename, filepath.Ext(filename))
 
-	// Split on the first underscore: {show-slug} _ {rest}
 	_, rest, ok := strings.Cut(base, "_")
 	if !ok {
 		return "", "", false
 	}
 
-	// Optional HI flag immediately after the first underscore.
 	if strings.HasPrefix(rest, "HI_") {
 		hi = true
 		rest = rest[3:]
 	}
 
-	// Split rest on the last dash: {language} - {id}
 	dash := strings.LastIndex(rest, "-")
 	if dash < 0 {
 		return "", "", false
@@ -717,7 +628,6 @@ func parseV2Filename(_ string, filename string) (subsceneID, language string, hi
 	return subsceneID, language, hi
 }
 
-// slugToTitle converts "the-dark-knight-rises" → "The Dark Knight Rises".
 func slugToTitle(slug string) string {
 	parts := strings.Split(slug, "-")
 	for i, p := range parts {

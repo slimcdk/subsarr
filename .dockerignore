@@ -6,4 +6,3 @@
 !main.go
 !cmd/
 !internal/
-!pb_migrations/

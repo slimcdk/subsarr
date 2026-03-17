@@ -14,7 +14,7 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux \
     CGO_CFLAGS="-I$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)" \
     go build \
-    -tags "sqlite_fts5 sqlite_stat4 no_default_driver" \
+    -tags "sqlite_fts5 sqlite_stat4" \
     -ldflags="-s -w -extldflags=-static" \
     -o subsarr ./main.go
 
@@ -27,15 +27,16 @@ WORKDIR /app
 
 COPY --from=builder /build/subsarr .
 
-# PocketBase database — must be persisted between containers.
-VOLUME ["/app/pb_data"]
-
-# Mount point for dump archives when running the import command:
-#   docker run --rm -v /path/to/subscene/archive:/tmp/subscene-archive subsarr \
-#     import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
+VOLUME ["/app/data"]
 VOLUME ["/tmp/subscene-archive"]
 
 EXPOSE 8090
 
+ENV SUBSARR_DB_DRIVER=sqlite
+ENV SUBSARR_DB_DSN=/app/data/subsarr.db
+ENV SUBSARR_STORAGE_BACKEND=filesystem
+ENV SUBSARR_STORAGE_PATH=/app/data/storage
+ENV SUBSARR_LISTEN=0.0.0.0:8090
+
 ENTRYPOINT ["/app/subsarr"]
-CMD ["serve", "--http=0.0.0.0:8090"]
+CMD ["serve"]
