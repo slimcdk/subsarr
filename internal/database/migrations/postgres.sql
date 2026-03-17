@@ -1,25 +1,26 @@
 CREATE TABLE IF NOT EXISTS subtitles (
-    id          TEXT PRIMARY KEY,
-    subscene_id TEXT NOT NULL,
-    title       TEXT NOT NULL,
-    slug        TEXT NOT NULL DEFAULT '',
-    imdb_id     TEXT NOT NULL DEFAULT '',
-    language    TEXT NOT NULL,
-    hi          BOOLEAN NOT NULL DEFAULT FALSE,
-    author      TEXT NOT NULL DEFAULT '',
-    releases    JSONB NOT NULL DEFAULT '[]',
-    comment     TEXT NOT NULL DEFAULT '',
-    year        INTEGER NOT NULL DEFAULT 0,
-    filename    TEXT NOT NULL,
-    format      TEXT NOT NULL DEFAULT '',
-    content_key TEXT NOT NULL DEFAULT '',
-    uploaded_at TIMESTAMPTZ,
-    downloads   INTEGER NOT NULL DEFAULT 0,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id           TEXT PRIMARY KEY,
+    subscene_id  TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    slug         TEXT NOT NULL DEFAULT '',
+    imdb_id      TEXT NOT NULL DEFAULT '',
+    language     TEXT NOT NULL,
+    hi           BOOLEAN NOT NULL DEFAULT FALSE,
+    author       TEXT NOT NULL DEFAULT '',
+    releases     JSONB NOT NULL DEFAULT '[]',
+    comment      TEXT NOT NULL DEFAULT '',
+    year         INTEGER NOT NULL DEFAULT 0,
+    filename     TEXT NOT NULL,
+    format       TEXT NOT NULL DEFAULT '',
+    content_key  TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    uploaded_at  TIMESTAMPTZ,
+    downloads    INTEGER NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_subtitles_subscene_file ON subtitles(slug, subscene_id, filename);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subtitles_content_dedup ON subtitles(subscene_id, content_hash);
 CREATE INDEX IF NOT EXISTS idx_subtitles_imdb_id ON subtitles(imdb_id);
 CREATE INDEX IF NOT EXISTS idx_subtitles_language ON subtitles(language);
 CREATE INDEX IF NOT EXISTS idx_subtitles_slug ON subtitles(slug);

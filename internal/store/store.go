@@ -25,8 +25,9 @@ type Subtitle struct {
 	Year       int
 	Filename   string
 	Format     string
-	ContentKey string
-	UploadedAt string
+	ContentKey  string
+	ContentHash string
+	UploadedAt  string
 	Downloads  int
 }
 

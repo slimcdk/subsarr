@@ -18,6 +18,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -533,12 +535,14 @@ func (im *importer) logFinal(mode string) {
 // maxContentSize is the largest file we'll store.
 const maxContentSize = 20 << 20 // 20 MB
 
-// storeContent uploads the subtitle file content to the storage backend
-// and sets the ContentKey on the subtitle record.
+// storeContent computes the SHA256 content hash, uploads the subtitle file
+// to the storage backend, and sets ContentKey and ContentHash on the record.
 func (im *importer) storeContent(sub *store.Subtitle, sf subFile) {
 	if len(sf.content) == 0 || len(sf.content) > maxContentSize {
 		return
 	}
+	h := sha256.Sum256(sf.content)
+	sub.ContentHash = hex.EncodeToString(h[:])
 	key := fmt.Sprintf("subtitles/%s/%s", sub.ID, storageFilename(sf.filename))
 	err := im.stor.Put(context.Background(), key, bytes.NewReader(sf.content), int64(len(sf.content)))
 	if err == nil {

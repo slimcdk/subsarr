@@ -37,8 +37,9 @@ func (s *mysqlStore) GetSubtitle(ctx context.Context, id string) (*Subtitle, err
 		Year:       int(row.Year),
 		Filename:   row.Filename,
 		Format:     row.Format,
-		ContentKey: row.ContentKey,
-		UploadedAt: uploadedAt,
+		ContentKey:  row.ContentKey,
+		ContentHash: row.ContentHash,
+		UploadedAt:  uploadedAt,
 		Downloads:  int(row.Downloads),
 	}, nil
 }
@@ -58,22 +59,23 @@ func (s *mysqlStore) InsertSubtitle(ctx context.Context, sub *Subtitle) (bool, e
 		}
 	}
 	result, err := s.q.InsertSubtitle(ctx, mysqldb.InsertSubtitleParams{
-		ID:         sub.ID,
-		SubsceneID: sub.SubsceneID,
-		Title:      sub.Title,
-		Slug:       sub.Slug,
-		ImdbID:     sub.ImdbID,
-		Language:   sub.Language,
-		Hi:         sub.HI,
-		Author:     sub.Author,
-		Releases:   myReleases(sub.Releases),
-		Comment:    sub.Comment,
-		Year:       int32(sub.Year),
-		Filename:   sub.Filename,
-		Format:     sub.Format,
-		ContentKey: sub.ContentKey,
-		UploadedAt: uploadedAt,
-		Downloads:  int32(sub.Downloads),
+		ID:          sub.ID,
+		SubsceneID:  sub.SubsceneID,
+		Title:       sub.Title,
+		Slug:        sub.Slug,
+		ImdbID:      sub.ImdbID,
+		Language:    sub.Language,
+		Hi:          sub.HI,
+		Author:      sub.Author,
+		Releases:    myReleases(sub.Releases),
+		Comment:     sub.Comment,
+		Year:        int32(sub.Year),
+		Filename:    sub.Filename,
+		Format:      sub.Format,
+		ContentKey:  sub.ContentKey,
+		ContentHash: sub.ContentHash,
+		UploadedAt:  uploadedAt,
+		Downloads:   int32(sub.Downloads),
 	})
 	if err != nil {
 		return false, err
@@ -96,22 +98,23 @@ func (s *mysqlStore) InsertSubtitleBatch(ctx context.Context, subs []*Subtitle) 
 			}
 		}
 		result, err := qtx.InsertSubtitle(ctx, mysqldb.InsertSubtitleParams{
-			ID:         sub.ID,
-			SubsceneID: sub.SubsceneID,
-			Title:      sub.Title,
-			Slug:       sub.Slug,
-			ImdbID:     sub.ImdbID,
-			Language:   sub.Language,
-			Hi:         sub.HI,
-			Author:     sub.Author,
-			Releases:   myReleases(sub.Releases),
-			Comment:    sub.Comment,
-			Year:       int32(sub.Year),
-			Filename:   sub.Filename,
-			Format:     sub.Format,
-			ContentKey: sub.ContentKey,
-			UploadedAt: uploadedAt,
-			Downloads:  int32(sub.Downloads),
+			ID:          sub.ID,
+			SubsceneID:  sub.SubsceneID,
+			Title:       sub.Title,
+			Slug:        sub.Slug,
+			ImdbID:      sub.ImdbID,
+			Language:    sub.Language,
+			Hi:          sub.HI,
+			Author:      sub.Author,
+			Releases:    myReleases(sub.Releases),
+			Comment:     sub.Comment,
+			Year:        int32(sub.Year),
+			Filename:    sub.Filename,
+			Format:      sub.Format,
+			ContentKey:  sub.ContentKey,
+			ContentHash: sub.ContentHash,
+			UploadedAt:  uploadedAt,
+			Downloads:   int32(sub.Downloads),
 		})
 		if err != nil {
 			errors++
@@ -181,7 +184,7 @@ func (s *mysqlStore) SearchSubtitles(ctx context.Context, p SearchParams) ([]Sub
 	}
 
 	query := `SELECT id, subscene_id, title, slug, imdb_id, language, hi, author, releases,
-       comment, year, filename, format, content_key, uploaded_at, downloads FROM subtitles`
+       comment, year, filename, format, content_key, content_hash, uploaded_at, downloads FROM subtitles`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -203,7 +206,7 @@ func (s *mysqlStore) SearchSubtitles(ctx context.Context, p SearchParams) ([]Sub
 			&sub.ID, &sub.SubsceneID, &sub.Title, &sub.Slug, &sub.ImdbID,
 			&sub.Language, &sub.HI, &sub.Author, &releases, &sub.Comment,
 			&sub.Year, &sub.Filename, &sub.Format, &sub.ContentKey,
-			&uploadedAt, &sub.Downloads,
+			&sub.ContentHash, &uploadedAt, &sub.Downloads,
 		); err != nil {
 			return nil, err
 		}

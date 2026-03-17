@@ -19,26 +19,27 @@ func openTestDB(t *testing.T) *sql.DB {
 
 	schema := `
 	CREATE TABLE subtitles (
-		id          TEXT PRIMARY KEY,
-		subscene_id TEXT NOT NULL,
-		title       TEXT NOT NULL,
-		slug        TEXT NOT NULL DEFAULT '',
-		imdb_id     TEXT NOT NULL DEFAULT '',
-		language    TEXT NOT NULL,
-		hi          INTEGER NOT NULL DEFAULT 0,
-		author      TEXT NOT NULL DEFAULT '',
-		releases    TEXT NOT NULL DEFAULT '[]',
-		comment     TEXT NOT NULL DEFAULT '',
-		year        INTEGER NOT NULL DEFAULT 0,
-		filename    TEXT NOT NULL,
-		format      TEXT NOT NULL DEFAULT '',
-		content_key TEXT NOT NULL DEFAULT '',
-		uploaded_at TEXT NOT NULL DEFAULT '',
-		downloads   INTEGER NOT NULL DEFAULT 0,
-		created_at  TEXT NOT NULL DEFAULT '',
-		updated_at  TEXT NOT NULL DEFAULT ''
+		id           TEXT PRIMARY KEY,
+		subscene_id  TEXT NOT NULL,
+		title        TEXT NOT NULL,
+		slug         TEXT NOT NULL DEFAULT '',
+		imdb_id      TEXT NOT NULL DEFAULT '',
+		language     TEXT NOT NULL,
+		hi           INTEGER NOT NULL DEFAULT 0,
+		author       TEXT NOT NULL DEFAULT '',
+		releases     TEXT NOT NULL DEFAULT '[]',
+		comment      TEXT NOT NULL DEFAULT '',
+		year         INTEGER NOT NULL DEFAULT 0,
+		filename     TEXT NOT NULL,
+		format       TEXT NOT NULL DEFAULT '',
+		content_key  TEXT NOT NULL DEFAULT '',
+		content_hash TEXT NOT NULL DEFAULT '',
+		uploaded_at  TEXT NOT NULL DEFAULT '',
+		downloads    INTEGER NOT NULL DEFAULT 0,
+		created_at   TEXT NOT NULL DEFAULT '',
+		updated_at   TEXT NOT NULL DEFAULT ''
 	);
-	CREATE UNIQUE INDEX idx_subtitles_subscene_file ON subtitles(slug, subscene_id, filename);
+	CREATE UNIQUE INDEX idx_subtitles_content_dedup ON subtitles(subscene_id, content_hash);
 	CREATE INDEX idx_subtitles_imdb_id ON subtitles(imdb_id);
 	CREATE INDEX idx_subtitles_language ON subtitles(language);
 	CREATE INDEX idx_subtitles_slug ON subtitles(slug);
@@ -62,15 +63,16 @@ func newTestStore(t *testing.T) Store {
 
 func makeSub(id, title, lang string) *Subtitle {
 	return &Subtitle{
-		ID:         id,
-		SubsceneID: id,
-		Title:      title,
-		Slug:       "test-slug",
-		ImdbID:     "tt1234567",
-		Language:   lang,
-		Filename:   title + ".srt",
-		Format:     "srt",
-		Releases:   "[]",
+		ID:          id,
+		SubsceneID:  id,
+		Title:       title,
+		Slug:        "test-slug",
+		ImdbID:      "tt1234567",
+		Language:    lang,
+		Filename:    title + ".srt",
+		Format:      "srt",
+		Releases:    "[]",
+		ContentHash: "hash-" + id, // unique per subtitle
 	}
 }
 
@@ -94,8 +96,9 @@ func TestInsertAndGetSubtitle(t *testing.T) {
 		Year:       2008,
 		Filename:   "dark-knight.srt",
 		Format:     "srt",
-		ContentKey: "subtitles/id-1/dark_knight.srt",
-		UploadedAt: "2024-01-15T10:00:00Z",
+		ContentKey:  "subtitles/id-1/dark_knight.srt",
+		ContentHash: "abc123def456",
+		UploadedAt:  "2024-01-15T10:00:00Z",
 		Downloads:  42,
 	}
 
@@ -164,8 +167,11 @@ func TestInsertSubtitle_Duplicate(t *testing.T) {
 		t.Error("first insert should succeed")
 	}
 
-	// Same slug+subscene_id+filename = duplicate
-	inserted, err = st.InsertSubtitle(ctx, sub)
+	// Same subscene_id+content_hash = duplicate
+	dup := makeSub("dup-1-copy", "Movie", "English")
+	dup.SubsceneID = sub.SubsceneID
+	dup.ContentHash = sub.ContentHash
+	inserted, err = st.InsertSubtitle(ctx, dup)
 	if err != nil {
 		t.Fatalf("duplicate insert: %v", err)
 	}
@@ -259,11 +265,6 @@ func TestListLanguages(t *testing.T) {
 		makeSub("l-3", "C", "French"),
 		makeSub("l-4", "D", "German"),
 	}
-	// Each needs a unique filename to avoid uniqueness constraint
-	subs[0].Filename = "a.srt"
-	subs[1].Filename = "b.srt"
-	subs[2].Filename = "c.srt"
-	subs[3].Filename = "d.srt"
 	st.InsertSubtitleBatch(ctx, subs)
 
 	langs, err := st.ListLanguages(ctx)
@@ -297,11 +298,11 @@ func seedSearch(t *testing.T, st Store) {
 	t.Helper()
 	ctx := context.Background()
 	subs := []*Subtitle{
-		{ID: "s1", SubsceneID: "sc1", Title: "The Dark Knight", Slug: "the-dark-knight", ImdbID: "tt0468569", Language: "English", HI: false, Filename: "dark.knight.srt", Format: "srt", Releases: `["1080p","BluRay"]`, Year: 2008, Downloads: 100},
-		{ID: "s2", SubsceneID: "sc2", Title: "The Dark Knight", Slug: "the-dark-knight", ImdbID: "tt0468569", Language: "English", HI: true, Filename: "dark.knight.hi.srt", Format: "srt", Releases: `["720p"]`, Year: 2008, Downloads: 50},
-		{ID: "s3", SubsceneID: "sc3", Title: "The Dark Knight", Slug: "the-dark-knight", ImdbID: "tt0468569", Language: "French", HI: false, Filename: "dark.knight.fr.srt", Format: "srt", Releases: `[]`, Year: 2008, Downloads: 30},
-		{ID: "s4", SubsceneID: "sc4", Title: "Loki", Slug: "loki", ImdbID: "tt9140554", Language: "English", HI: false, Filename: "Loki.S01E03.srt", Format: "srt", Releases: `["S01E03","WEB-DL"]`, Year: 2021, Downloads: 200},
-		{ID: "s5", SubsceneID: "sc5", Title: "Loki", Slug: "loki", ImdbID: "tt9140554", Language: "English", HI: false, Filename: "Loki.S02E01.srt", Format: "srt", Releases: `["S02E01","WEB-DL"]`, Year: 2023, Downloads: 150},
+		{ID: "s1", SubsceneID: "sc1", Title: "The Dark Knight", Slug: "the-dark-knight", ImdbID: "tt0468569", Language: "English", HI: false, Filename: "dark.knight.srt", Format: "srt", Releases: `["1080p","BluRay"]`, Year: 2008, Downloads: 100, ContentHash: "hash-s1"},
+		{ID: "s2", SubsceneID: "sc2", Title: "The Dark Knight", Slug: "the-dark-knight", ImdbID: "tt0468569", Language: "English", HI: true, Filename: "dark.knight.hi.srt", Format: "srt", Releases: `["720p"]`, Year: 2008, Downloads: 50, ContentHash: "hash-s2"},
+		{ID: "s3", SubsceneID: "sc3", Title: "The Dark Knight", Slug: "the-dark-knight", ImdbID: "tt0468569", Language: "French", HI: false, Filename: "dark.knight.fr.srt", Format: "srt", Releases: `[]`, Year: 2008, Downloads: 30, ContentHash: "hash-s3"},
+		{ID: "s4", SubsceneID: "sc4", Title: "Loki", Slug: "loki", ImdbID: "tt9140554", Language: "English", HI: false, Filename: "Loki.S01E03.srt", Format: "srt", Releases: `["S01E03","WEB-DL"]`, Year: 2021, Downloads: 200, ContentHash: "hash-s4"},
+		{ID: "s5", SubsceneID: "sc5", Title: "Loki", Slug: "loki", ImdbID: "tt9140554", Language: "English", HI: false, Filename: "Loki.S02E01.srt", Format: "srt", Releases: `["S02E01","WEB-DL"]`, Year: 2023, Downloads: 150, ContentHash: "hash-s5"},
 	}
 	st.InsertSubtitleBatch(ctx, subs)
 }
