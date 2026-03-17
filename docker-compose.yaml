@@ -1,5 +1,6 @@
 volumes:
-  data:
+  db:
+  storage:
 
 services:
 
@@ -10,10 +11,11 @@ services:
       - 8091:8090
     environment:
       SUBSARR_DB_DRIVER: sqlite
-      SUBSARR_DB_DSN: /app/data/subsarr.db
+      SUBSARR_DB_DSN: /app/db/subsarr.db
       SUBSARR_STORAGE_BACKEND: filesystem
-      SUBSARR_STORAGE_PATH: /app/data/storage
+      SUBSARR_STORAGE_PATH: /app/storage
     volumes:
-      - data:/app/data
+      - db:/app/db
+      - storage:/app/storage
       - ./subscene-dump:/tmp/subscene-archive
     restart: unless-stopped

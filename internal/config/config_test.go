@@ -27,8 +27,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.StorageBackend != "filesystem" {
 		t.Errorf("StorageBackend = %q, want %q", cfg.StorageBackend, "filesystem")
 	}
-	if cfg.StoragePath != "./data/storage" {
-		t.Errorf("StoragePath = %q, want %q", cfg.StoragePath, "./data/storage")
+	if cfg.StoragePath != "./storage" {
+		t.Errorf("StoragePath = %q, want %q", cfg.StoragePath, "./storage")
 	}
 	if cfg.S3Bucket != "subsarr" {
 		t.Errorf("S3Bucket = %q, want %q", cfg.S3Bucket, "subsarr")

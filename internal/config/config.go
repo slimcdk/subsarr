@@ -21,7 +21,7 @@ func Load() Config {
 		DBDriver:       envOr("SUBSARR_DB_DRIVER", "sqlite"),
 		DBDSN:          envOr("SUBSARR_DB_DSN", "subsarr.db"),
 		StorageBackend: envOr("SUBSARR_STORAGE_BACKEND", "filesystem"),
-		StoragePath:    envOr("SUBSARR_STORAGE_PATH", "./data/storage"),
+		StoragePath:    envOr("SUBSARR_STORAGE_PATH", "./storage"),
 		S3Endpoint:     os.Getenv("SUBSARR_S3_ENDPOINT"),
 		S3Bucket:       envOr("SUBSARR_S3_BUCKET", "subsarr"),
 		S3Region:       envOr("SUBSARR_S3_REGION", "us-east-1"),

@@ -37,7 +37,8 @@ This is a one-time step. The import streams directly from the archive and takes 
 
 ```bash
 docker run --rm \
-  -v /srv/subsarr/data:/app/data \
+  -v /srv/subsarr/db:/app/db \
+  -v /mnt/array/subsarr/storage:/app/storage \
   -v /path/to/subscene/archive:/tmp/subscene-archive \
   ghcr.io/slimcdk/subsarr:latest \
   import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
@@ -60,7 +61,8 @@ Progress is printed to stdout:
 docker run -d \
   --name subsarr \
   --restart unless-stopped \
-  -v /srv/subsarr/data:/app/data \
+  -v /srv/subsarr/db:/app/db \
+  -v /mnt/array/subsarr/storage:/app/storage \
   -p 8090:8090 \
   ghcr.io/slimcdk/subsarr:latest
 ```
@@ -77,14 +79,12 @@ services:
   subsarr:
     image: ghcr.io/slimcdk/subsarr:latest
     volumes:
-      - subsarr-data:/app/data
+      - /mnt/cache/subsarr/db:/app/db           # SSD/cache — fast reads
+      - /mnt/array/subsarr/storage:/app/storage  # array — bulk file storage
       - /path/to/subscene/archive:/tmp/subscene-archive:ro
     ports:
       - 8090:8090
     restart: unless-stopped
-
-volumes:
-  subsarr-data:
 ```
 
 ```bash
@@ -106,7 +106,7 @@ All settings are via environment variables. Defaults are tuned for the simplest 
 | `SUBSARR_DB_DRIVER` | `sqlite` | Database backend: `sqlite`, `postgres`, or `mysql` |
 | `SUBSARR_DB_DSN` | `subsarr.db` | Connection string (file path for SQLite, URL for others) |
 | `SUBSARR_STORAGE_BACKEND` | `filesystem` | File storage: `filesystem` or `s3` |
-| `SUBSARR_STORAGE_PATH` | `./data/storage` | Local filesystem root (when backend=filesystem) |
+| `SUBSARR_STORAGE_PATH` | `./storage` | Local filesystem root (when backend=filesystem) |
 | `SUBSARR_S3_ENDPOINT` | | S3-compatible endpoint URL |
 | `SUBSARR_S3_BUCKET` | `subsarr` | S3 bucket name |
 | `SUBSARR_S3_REGION` | `us-east-1` | S3 region |

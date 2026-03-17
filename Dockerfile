@@ -27,15 +27,16 @@ WORKDIR /app
 
 COPY --from=builder /build/subsarr .
 
-VOLUME ["/app/data"]
+VOLUME ["/app/db"]
+VOLUME ["/app/storage"]
 VOLUME ["/tmp/subscene-archive"]
 
 EXPOSE 8090
 
 ENV SUBSARR_DB_DRIVER=sqlite
-ENV SUBSARR_DB_DSN=/app/data/subsarr.db
+ENV SUBSARR_DB_DSN=/app/db/subsarr.db
 ENV SUBSARR_STORAGE_BACKEND=filesystem
-ENV SUBSARR_STORAGE_PATH=/app/data/storage
+ENV SUBSARR_STORAGE_PATH=/app/storage
 ENV SUBSARR_LISTEN=0.0.0.0:8090
 
 ENTRYPOINT ["/app/subsarr"]
