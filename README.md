@@ -10,6 +10,16 @@ It imports the community-preserved Subscene V2 dump (~2.7 million entries) into 
 
 ---
 
+## Features
+
+- **Configurable database** — SQLite (default), PostgreSQL, or MySQL/MariaDB
+- **Configurable storage** — local filesystem (default) or any S3-compatible object store
+- **No authentication required** — simple read-only subtitle API
+- **Streaming import** — reads directly from the 7z archive, no extraction needed
+- **Single binary** — statically compiled Go with zero runtime dependencies
+
+---
+
 ## Getting started
 
 ### Step 1 — Get the archive
@@ -27,7 +37,7 @@ This is a one-time step. The import streams directly from the archive and takes 
 
 ```bash
 docker run --rm \
-  -v /srv/subsarr/pb_data:/app/pb_data \
+  -v /srv/subsarr/data:/app/data \
   -v /path/to/subscene/archive:/tmp/subscene-archive \
   ghcr.io/slimcdk/subsarr:latest \
   import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
@@ -44,27 +54,18 @@ Progress is printed to stdout:
 [import:V2 stream] done: 2706833 processed  2695441 imported  ...  in 2h28m
 ```
 
-### Step 3 — Create a superuser
-
-```bash
-docker run --rm \
-  -v /srv/subsarr/pb_data:/app/pb_data \
-  ghcr.io/slimcdk/subsarr:latest \
-  superuser create [email] [pass]
-```
-
-### Step 4 — Run the server
+### Step 3 — Run the server
 
 ```bash
 docker run -d \
   --name subsarr \
   --restart unless-stopped \
-  -v /srv/subsarr/pb_data:/app/pb_data \
+  -v /srv/subsarr/data:/app/data \
   -p 8090:8090 \
   ghcr.io/slimcdk/subsarr:latest
 ```
 
-The admin UI is available at `http://localhost:8090/_/`.
+The API is available at `http://localhost:8090/api/v1/`.
 
 ---
 
@@ -76,11 +77,10 @@ services:
   subsarr:
     image: ghcr.io/slimcdk/subsarr:latest
     volumes:
-      - subsarr-data:/app/pb_data
+      - subsarr-data:/app/data
       - /path/to/subscene/archive:/tmp/subscene-archive:ro
     ports:
       - 8090:8090
-    # command: import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
     restart: unless-stopped
 
 volumes:
@@ -88,7 +88,100 @@ volumes:
 ```
 
 ```bash
-docker compose up -d
-docker compose run --rm subsarr superuser create [email] [password]
+# Import (one-time)
 docker compose run --rm subsarr import-dump --archive "/tmp/subscene-archive/Subscene V2.7z.001"
+
+# Start the server
+docker compose up -d
+```
+
+---
+
+## Configuration
+
+All settings are via environment variables. Defaults are tuned for the simplest setup (SQLite + local filesystem).
+
+| Variable | Default | Description |
+|---|---|---|
+| `SUBSARR_DB_DRIVER` | `sqlite` | Database backend: `sqlite`, `postgres`, or `mysql` |
+| `SUBSARR_DB_DSN` | `subsarr.db` | Connection string (file path for SQLite, URL for others) |
+| `SUBSARR_STORAGE_BACKEND` | `filesystem` | File storage: `filesystem` or `s3` |
+| `SUBSARR_STORAGE_PATH` | `./data/storage` | Local filesystem root (when backend=filesystem) |
+| `SUBSARR_S3_ENDPOINT` | | S3-compatible endpoint URL |
+| `SUBSARR_S3_BUCKET` | `subsarr` | S3 bucket name |
+| `SUBSARR_S3_REGION` | `us-east-1` | S3 region |
+| `SUBSARR_S3_ACCESS_KEY` | | S3 access key |
+| `SUBSARR_S3_SECRET_KEY` | | S3 secret key |
+| `SUBSARR_S3_PATH_STYLE` | `false` | Use path-style S3 URLs (required for most self-hosted S3) |
+| `SUBSARR_LISTEN` | `0.0.0.0:8090` | HTTP listen address |
+
+### Example: PostgreSQL + S3
+
+```yaml
+services:
+  subsarr:
+    image: ghcr.io/slimcdk/subsarr:latest
+    environment:
+      SUBSARR_DB_DRIVER: postgres
+      SUBSARR_DB_DSN: postgres://user:pass@postgres:5432/subsarr?sslmode=disable
+      SUBSARR_STORAGE_BACKEND: s3
+      SUBSARR_S3_ENDPOINT: http://s3:3900
+      SUBSARR_S3_BUCKET: subsarr
+      SUBSARR_S3_ACCESS_KEY: your-access-key
+      SUBSARR_S3_SECRET_KEY: your-secret-key
+      SUBSARR_S3_PATH_STYLE: "true"
+    ports:
+      - 8090:8090
+```
+
+---
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/info` | Provider metadata and capabilities |
+| `GET /api/v1/languages` | Available languages with counts |
+| `GET /api/v1/subtitles/search` | Search subtitles (see params below) |
+| `GET /api/v1/subtitles/{id}/download` | Download a subtitle file |
+
+### Search parameters
+
+| Param | Example | Description |
+|---|---|---|
+| `imdb_id` | `tt0468569` | Filter by IMDB ID |
+| `language` | `English` | Filter by language name |
+| `slug` | `the-dark-knight` | Filter by Subscene slug |
+| `query` | `dark knight` | Free-text search on title/filename |
+| `hi` | `true` | Hearing-impaired only |
+| `year` | `2008` | Filter by release year |
+| `season` | `2` | Filter by season number (S02 pattern) |
+| `episode` | `5` | Combined with season for S02E05 pattern |
+| `page` | `1` | Page number (1-based) |
+| `per_page` | `50` | Results per page (max 200) |
+
+---
+
+## Development
+
+```bash
+# Build
+make build
+
+# Run server
+make run
+
+# Run tests
+make test
+
+# Build Docker image
+make docker-build
+```
+
+### sqlc
+
+Database queries are managed with [sqlc](https://sqlc.dev/). Schema and query files are in `sql/`. To regenerate Go code after modifying queries:
+
+```bash
+sqlc generate
 ```
