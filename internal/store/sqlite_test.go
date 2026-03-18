@@ -311,7 +311,7 @@ func TestSearch_NoFilters(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, err := st.SearchSubtitles(context.Background(), SearchParams{Limit: 50, Offset: 0})
+	results, _, err := st.SearchSubtitles(context.Background(), SearchParams{Limit: 50, Offset: 0})
 	if err != nil {
 		t.Fatalf("SearchSubtitles: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestSearch_ByImdbID(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		ImdbID: "tt0468569", Limit: 50,
 	})
 	if len(results) != 3 {
@@ -340,7 +340,7 @@ func TestSearch_ByLanguage(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		Language: "French", Limit: 50,
 	})
 	if len(results) != 1 {
@@ -355,7 +355,7 @@ func TestSearch_BySlug(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		Slug: "loki", Limit: 50,
 	})
 	if len(results) != 2 {
@@ -368,7 +368,7 @@ func TestSearch_ByHI(t *testing.T) {
 	seedSearch(t, st)
 
 	hi := true
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		HI: &hi, Limit: 50,
 	})
 	if len(results) != 1 {
@@ -383,7 +383,7 @@ func TestSearch_ByYear(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		Year: 2021, Limit: 50,
 	})
 	if len(results) != 1 {
@@ -395,7 +395,7 @@ func TestSearch_ByQuery(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		Query: "dark", Limit: 50,
 	})
 	if len(results) != 3 {
@@ -408,7 +408,7 @@ func TestSearch_BySeasonEpisode(t *testing.T) {
 	seedSearch(t, st)
 
 	// Season+episode in releases
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		SeasonEp: "S01E03", Limit: 50,
 	})
 	if len(results) != 1 {
@@ -416,7 +416,7 @@ func TestSearch_BySeasonEpisode(t *testing.T) {
 	}
 
 	// Season only — matches both S01E03 and S02E01 via filename
-	results, _ = st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ = st.SearchSubtitles(context.Background(), SearchParams{
 		SeasonEp: "S02", Limit: 50,
 	})
 	if len(results) != 1 {
@@ -428,7 +428,7 @@ func TestSearch_CombinedFilters(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, _ := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, _ := st.SearchSubtitles(context.Background(), SearchParams{
 		ImdbID:   "tt0468569",
 		Language: "English",
 		Limit:    50,
@@ -442,9 +442,9 @@ func TestSearch_Pagination(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	page1, _ := st.SearchSubtitles(context.Background(), SearchParams{Limit: 2, Offset: 0})
-	page2, _ := st.SearchSubtitles(context.Background(), SearchParams{Limit: 2, Offset: 2})
-	page3, _ := st.SearchSubtitles(context.Background(), SearchParams{Limit: 2, Offset: 4})
+	page1, _, _ := st.SearchSubtitles(context.Background(), SearchParams{Limit: 2, Offset: 0})
+	page2, _, _ := st.SearchSubtitles(context.Background(), SearchParams{Limit: 2, Offset: 2})
+	page3, _, _ := st.SearchSubtitles(context.Background(), SearchParams{Limit: 2, Offset: 4})
 
 	if len(page1) != 2 {
 		t.Errorf("page1 len = %d, want 2", len(page1))
@@ -461,7 +461,7 @@ func TestSearch_NoResults(t *testing.T) {
 	st := newTestStore(t)
 	seedSearch(t, st)
 
-	results, err := st.SearchSubtitles(context.Background(), SearchParams{
+	results, _, err := st.SearchSubtitles(context.Background(), SearchParams{
 		Language: "Klingon", Limit: 50,
 	})
 	if err != nil {

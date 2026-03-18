@@ -133,7 +133,7 @@ func (s *sqliteStore) ListLanguages(ctx context.Context) ([]LanguageCount, error
 	return result, nil
 }
 
-func (s *sqliteStore) SearchSubtitles(ctx context.Context, p SearchParams) ([]Subtitle, error) {
+func (s *sqliteStore) SearchSubtitles(ctx context.Context, p SearchParams) ([]Subtitle, int, error) {
 	var where []string
 	var args []any
 
@@ -167,17 +167,21 @@ func (s *sqliteStore) SearchSubtitles(ctx context.Context, p SearchParams) ([]Su
 		args = append(args, pattern, pattern)
 	}
 
-	query := `SELECT id, subscene_id, title, slug, imdb_id, language, hi, author, releases,
-       comment, year, filename, format, content_key, content_hash, uploaded_at, downloads FROM subtitles`
+	whereClause := ""
 	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+		whereClause = " WHERE " + strings.Join(where, " AND ")
 	}
-	query += " ORDER BY downloads DESC LIMIT ? OFFSET ?"
-	args = append(args, p.Limit, p.Offset)
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	var total int
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM subtitles"+whereClause, args...).Scan(&total)
+
+	query := `SELECT id, subscene_id, title, slug, imdb_id, language, hi, author, releases,
+       comment, year, filename, format, content_key, content_hash, uploaded_at, downloads FROM subtitles` + whereClause + " ORDER BY downloads DESC LIMIT ? OFFSET ?"
+	queryArgs := append(args, p.Limit, p.Offset)
+
+	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -191,10 +195,10 @@ func (s *sqliteStore) SearchSubtitles(ctx context.Context, p SearchParams) ([]Su
 			&sub.Year, &sub.Filename, &sub.Format, &sub.ContentKey,
 			&sub.ContentHash, &sub.UploadedAt, &sub.Downloads,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		sub.HI = hi != 0
 		results = append(results, sub)
 	}
-	return results, rows.Err()
+	return results, total, rows.Err()
 }

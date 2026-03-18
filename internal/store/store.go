@@ -54,7 +54,7 @@ type Store interface {
 	InsertSubtitleBatch(ctx context.Context, subs []*Subtitle) (inserted, skipped, errors int)
 	IncrementDownloads(ctx context.Context, id string) error
 	ListLanguages(ctx context.Context) ([]LanguageCount, error)
-	SearchSubtitles(ctx context.Context, p SearchParams) ([]Subtitle, error)
+	SearchSubtitles(ctx context.Context, p SearchParams) ([]Subtitle, int, error)
 }
 
 // New creates a Store for the given database driver.

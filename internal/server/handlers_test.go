@@ -18,7 +18,7 @@ import (
 type mockStore struct {
 	subtitles map[string]*store.Subtitle
 	languages []store.LanguageCount
-	searchFn  func(store.SearchParams) ([]store.Subtitle, error)
+	searchFn  func(store.SearchParams) ([]store.Subtitle, int, error)
 }
 
 func newMockStore() *mockStore {
@@ -56,7 +56,7 @@ func (m *mockStore) ListLanguages(_ context.Context) ([]store.LanguageCount, err
 	return m.languages, nil
 }
 
-func (m *mockStore) SearchSubtitles(_ context.Context, p store.SearchParams) ([]store.Subtitle, error) {
+func (m *mockStore) SearchSubtitles(_ context.Context, p store.SearchParams) ([]store.Subtitle, int, error) {
 	if m.searchFn != nil {
 		return m.searchFn(p)
 	}
@@ -64,7 +64,7 @@ func (m *mockStore) SearchSubtitles(_ context.Context, p store.SearchParams) ([]
 	for _, s := range m.subtitles {
 		results = append(results, *s)
 	}
-	return results, nil
+	return results, len(results), nil
 }
 
 // ─── mock storage ────────────────────────────────────────────────────────────
@@ -183,10 +183,10 @@ func TestHandleLanguages_Empty(t *testing.T) {
 
 func TestHandleSearch(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		return []store.Subtitle{
 			{ID: "s1", Title: "Test", Language: "English", Releases: `["1080p"]`, Downloads: 10},
-		}, nil
+		}, 1, nil
 	}
 	srv := New(ms, newMockStorage())
 
@@ -221,11 +221,11 @@ func TestHandleSearch(t *testing.T) {
 
 func TestHandleSearch_Pagination(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		if p.Limit != 5 || p.Offset != 10 {
 			t.Errorf("params = limit=%d offset=%d, want limit=5 offset=10", p.Limit, p.Offset)
 		}
-		return nil, nil
+		return nil, 0, nil
 	}
 	srv := New(ms, newMockStorage())
 
@@ -240,11 +240,11 @@ func TestHandleSearch_Pagination(t *testing.T) {
 
 func TestHandleSearch_PerPageClamped(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		if p.Limit != 200 {
 			t.Errorf("limit = %d, want 200 (clamped)", p.Limit)
 		}
-		return nil, nil
+		return nil, 0, nil
 	}
 	srv := New(ms, newMockStorage())
 
@@ -255,11 +255,11 @@ func TestHandleSearch_PerPageClamped(t *testing.T) {
 
 func TestHandleSearch_SeasonEpisode(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		if p.SeasonEp != "S02E05" {
 			t.Errorf("SeasonEp = %q, want S02E05", p.SeasonEp)
 		}
-		return nil, nil
+		return nil, 0, nil
 	}
 	srv := New(ms, newMockStorage())
 
@@ -270,11 +270,11 @@ func TestHandleSearch_SeasonEpisode(t *testing.T) {
 
 func TestHandleSearch_SeasonOnly(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		if p.SeasonEp != "S03" {
 			t.Errorf("SeasonEp = %q, want S03", p.SeasonEp)
 		}
-		return nil, nil
+		return nil, 0, nil
 	}
 	srv := New(ms, newMockStorage())
 
@@ -285,11 +285,11 @@ func TestHandleSearch_SeasonOnly(t *testing.T) {
 
 func TestHandleSearch_HI(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		if p.HI == nil || !*p.HI {
 			t.Error("HI should be true")
 		}
-		return nil, nil
+		return nil, 0, nil
 	}
 	srv := New(ms, newMockStorage())
 
@@ -300,10 +300,10 @@ func TestHandleSearch_HI(t *testing.T) {
 
 func TestHandleSearch_ReleasesJSON(t *testing.T) {
 	ms := newMockStore()
-	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, error) {
+	ms.searchFn = func(p store.SearchParams) ([]store.Subtitle, int, error) {
 		return []store.Subtitle{
 			{ID: "r1", Releases: `["1080p","BluRay"]`},
-		}, nil
+		}, 1, nil
 	}
 	srv := New(ms, newMockStorage())
 

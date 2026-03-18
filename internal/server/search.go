@@ -61,7 +61,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	records, err := s.store.SearchSubtitles(r.Context(), params)
+	records, total, err := s.store.SearchSubtitles(r.Context(), params)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -95,7 +95,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"items":       results,
-		"total_items": len(results),
+		"total_items": total,
 		"page":        page,
 		"per_page":    perPage,
 	})
