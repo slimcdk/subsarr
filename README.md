@@ -139,6 +139,7 @@ Measured on the V2 dump (97 GB, all parts CRC-verified):
 | Subtitle files after import | ~4.9 million |
 | Languages | 90 requestable, ~120 present |
 | SQLite database | ~3.5 GB |
+| Free space needed to migrate an existing one | ~1× the database, plus ~1 GB |
 | Subtitle storage | ~40 GB (after deduplication; 12.9 % of the raw files are duplicates) |
 | Import duration | 8–12 h on a NAS |
 

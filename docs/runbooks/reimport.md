@@ -49,6 +49,12 @@ For PostgreSQL or MariaDB use `pg_dump` / `mariadb-dump` instead.
 Storage is not backed up: it is rebuilt from the archive, and the import only
 adds to it until the old objects are no longer referenced.
 
+**Free space.** The data migration writes the catalogue model alongside the flat
+table before dropping it, so keep roughly the size of the database free — about
+4 GB for the reference installation — plus a gigabyte for the write-ahead log.
+SQLite does not shrink the file after dropping the old table; the space is reused
+by the import, and `VACUUM` reclaims it if you would rather have it back.
+
 ---
 
 ## 2. Look at the dump
@@ -79,7 +85,8 @@ docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr migrate stat
 
 The first `status` shows every migration pending; the second shows all four
 applied. The data migration between them moves the flat table into the catalogue
-model, keeping every file id, and takes a few minutes on five million rows.
+model, keeping every file id. On the reference database — 4.9 million rows — it
+takes about a quarter of an hour and prints its progress as it goes.
 
 Start the service again and confirm it still answers:
 
