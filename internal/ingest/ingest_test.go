@@ -606,3 +606,37 @@ func TestIngest_EntriesWhoseNameTheArchiveTruncated(t *testing.T) {
 		t.Error("a loose text file at the archive root was imported as a subtitle")
 	}
 }
+
+// The archive names an entry from the root of the dump; the V2 catalogue records
+// the same entry from the directory the subtitles live in. Neither is wrong, and
+// they have to meet.
+func TestIngest_CataloguePathsRelativeToTheWork(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	const dump = "CREATE TABLE `all_subs` (`id` int, `title` text, `imdb` int, `lang` text, `fileLink` text);\n" +
+		"INSERT INTO `all_subs` VALUES " +
+		"(1667503,'1 Buck',4685428,'danish','1-buck/1-buck_danish-1667503.zip');\n"
+
+	in := ingest.New(h.st, h.storage, ingest.Options{})
+	if _, err := in.LoadCatalogue(ctx, strings.NewReader(dump), ingest.CatalogueSQL); err != nil {
+		t.Fatalf("LoadCatalogue: %v", err)
+	}
+	if err := in.Run(ctx, archive.MemorySource{{
+		Path:    "Subscene V2/Subscene Files DB/1-buck/1-buck_danish-1667503.zip",
+		Content: zipOf(t, map[string]string{"1 Buck.srt": srtA}),
+	}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := h.st.Reindex(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	subs, total := h.search(t, store.SearchParams{ImdbID: "tt4685428", Language: "danish"})
+	if total != 1 {
+		t.Fatalf("total = %d, want 1 — the catalogue row and the archive entry did not meet", total)
+	}
+	if subs[0].Title != "1 Buck" {
+		t.Errorf("title = %q, want the catalogue's", subs[0].Title)
+	}
+}

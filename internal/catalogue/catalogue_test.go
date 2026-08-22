@@ -307,3 +307,74 @@ func TestReadJSON(t *testing.T) {
 		t.Errorf("got %+v", second)
 	}
 }
+
+// What the real V2 dump looks like: a bare integer for the IMDB id and 0 for
+// none, a link of `<slug>/<language>/<id>`, a file path relative to the
+// directory the subtitles live in, and a release list the dump sometimes cuts
+// off mid-array.
+const realDump = "CREATE TABLE `all_subs` (\n" +
+	"  `id` int(11) NOT NULL,\n" +
+	"  `title` varchar(255),\n" +
+	"  `imdb` int(11),\n" +
+	"  `date` datetime,\n" +
+	"  `author_name` varchar(128),\n" +
+	"  `author_id` int(11),\n" +
+	"  `lang` varchar(64),\n" +
+	"  `comment` text,\n" +
+	"  `releases` text,\n" +
+	"  `subscene_link` varchar(255),\n" +
+	"  `fileLink` varchar(512)\n" +
+	");\n" +
+	"INSERT INTO `all_subs` VALUES " +
+	`(4, '1 Buck', 4685428, '2017-11-21 09:17:00', 'BndrST', 1078283, 'indonesian', '', ` +
+	`'[\"1.Buck.2017.720p.BluRay.x264.DTS-MT\"]', '1-buck/indonesian/1669883', '1-buck/1-buck_indonesian-1669883.zip'),` +
+	`(3, 'Chennai Express', 0, '2016-01-14 03:57:00', 'Ajay.jr', 965489, 'english', 'sub perfect sync', ` +
+	`'[\"A\",\"B\"]', 'chennai-express/english/1257824', 'chennai-express/chennai-express_HI_english-1257824.zip'),` +
+	`(7, 'The Great Train Robbery', 439, '2011-06-01 21:23:00', 'jrgnsapi', 528726, 'english', '', ` +
+	`'[\"0.0 Mhz.720p.Web-DL', 'the-great-train-robbery/english/2047606', ` +
+	`'the-great-train-robbery/the-great-train-robbery_english-2047606.zip');` + "\n"
+
+func TestRead_TheRealDumpsShape(t *testing.T) {
+	rows, result := readAll(t, realDump)
+
+	for role, want := range map[string]string{
+		RoleID: "id", RolePath: "fileLink", RoleTitle: "title", RoleIMDB: "imdb",
+		RoleLanguage: "lang", RoleReleases: "releases", RoleAuthor: "author_name",
+		RoleAuthorID: "author_id", RoleComment: "comment", RoleDate: "date",
+		RoleSlug: "subscene_link",
+	} {
+		if result.Mapping[role] != want {
+			t.Errorf("role %s mapped to %q, want %q", role, result.Mapping[role], want)
+		}
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+
+	if rows[0].ImdbID != "tt4685428" || rows[0].Slug != "1-buck" {
+		t.Errorf("got %+v", rows[0])
+	}
+
+	// 0 is how the dump spells "no IMDB id"; it must not become tt0000000.
+	if rows[1].ImdbID != "" {
+		t.Errorf("imdb = %q, want empty for the dump's zero", rows[1].ImdbID)
+	}
+	if len(rows[1].Releases) != 2 {
+		t.Errorf("releases = %v, want two", rows[1].Releases)
+	}
+	if !rows[1].HI {
+		t.Error("_HI_ in the file name means hearing impaired")
+	}
+
+	// An old film's id is a short integer, and its leading zeros are gone.
+	if rows[2].ImdbID != "tt0000439" {
+		t.Errorf("imdb = %q, want tt0000439", rows[2].ImdbID)
+	}
+	// A release list the dump cut off mid-array is still release names.
+	if len(rows[2].Releases) != 1 || rows[2].Releases[0] != "0.0 Mhz.720p.Web-DL" {
+		t.Errorf("releases = %q, want the names without the JSON punctuation", rows[2].Releases)
+	}
+	if rows[2].Slug != "the-great-train-robbery" {
+		t.Errorf("slug = %q", rows[2].Slug)
+	}
+}

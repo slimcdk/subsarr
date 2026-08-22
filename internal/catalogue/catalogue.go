@@ -84,7 +84,7 @@ var roleCandidates = []struct {
 	{RoleComment, []string{"comment", "comments", "note", "notes", "description"}, []string{"comment"}},
 	{RoleDate, []string{"date", "upload_date", "uploaded_at", "created_at", "added", "datetime", "upload_time"}, []string{"date", "time"}},
 	{RoleTitle, []string{"title", "movie_title", "movie_name", "movie", "name"}, []string{"title"}},
-	{RoleSlug, []string{"slug", "movie_url", "url", "link", "original", "page"}, []string{"slug", "url"}},
+	{RoleSlug, []string{"slug", "movie_url", "url", "link", "original", "page"}, []string{"slug", "url", "link"}},
 	{RoleID, []string{"subscene_id", "sub_id", "subtitle_id", "id"}, []string{"subscene"}},
 }
 
@@ -254,26 +254,33 @@ func complete(u Upload) Upload {
 }
 
 var (
-	imdbDigits  = regexp.MustCompile(`(\d{5,})`)
+	imdbDigits  = regexp.MustCompile(`(\d+)`)
 	subsceneID  = regexp.MustCompile(`-(\d+)(?:\.[A-Za-z0-9]+)?$`)
 	slugFromURL = regexp.MustCompile(`/subtitles/([^/?#]+)`)
 )
 
 // NormaliseIMDB renders whatever the dump holds — an integer, a tt id, a URL — as
 // the `tt` + at least seven digits form Bazarr sends.
+//
+// The dump writes the id as a plain integer and 0 for "unknown", so the leading
+// zeros of an old film's id are gone: 439 is The Great Train Robbery, and there
+// are 925 rows like it.
 func NormaliseIMDB(raw string) string {
 	m := imdbDigits.FindStringSubmatch(raw)
 	if m == nil {
 		return ""
 	}
-	digits := m[1]
+	digits := strings.TrimLeft(m[1], "0")
+	if digits == "" {
+		return ""
+	}
 	if len(digits) < 7 {
 		digits = strings.Repeat("0", 7-len(digits)) + digits
 	}
 	return "tt" + digits
 }
 
-// slugOf takes the slug from the catalogue's own URL column when there is one,
+// slugOf takes the slug from the catalogue's own link column when there is one,
 // and otherwise from the directory the file sits in — which is how the archive is
 // laid out.
 func slugOf(raw, filePath string) string {
@@ -283,6 +290,11 @@ func slugOf(raw, filePath string) string {
 		}
 		if !strings.Contains(raw, "/") && !strings.Contains(raw, " ") {
 			return raw
+		}
+		// `<slug>/<language>/<id>`, which is how the V2 dump records the page a
+		// subtitle came from.
+		if head, _, ok := strings.Cut(raw, "/"); ok && head != "" && !strings.Contains(head, " ") {
+			return head
 		}
 	}
 	if dir := path.Dir(filePath); dir != "." && dir != "/" && dir != "" {
@@ -319,6 +331,11 @@ func ParseReleases(raw string) []string {
 		if err := json.Unmarshal([]byte(raw), &releases); err == nil {
 			return clean(releases)
 		}
+		// The dump cuts a long release list off mid-array. What is left is still
+		// the uploader's release names; only the punctuation has to go, or Bazarr
+		// would score against a name beginning `["`.
+		raw = strings.Trim(raw, `[]"`)
+		raw = strings.ReplaceAll(raw, `","`, "\n")
 	}
 
 	separator := "\n"

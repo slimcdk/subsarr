@@ -400,9 +400,10 @@ func (i *Ingester) resolveUploads(ctx context.Context, entries []archive.Entry) 
 	idOf := make(map[string]string, len(entries))
 
 	for _, e := range entries {
-		// Both the full path and the bare file name: the V2 catalogue records a
-		// path inside the archive, the V1 one records only the download's name.
-		paths = append(paths, e.Name(), path.Base(e.Name()))
+		// The archive names an entry from the root of the dump; the V2 catalogue
+		// records it from the directory the subtitles live in, and the V1 one
+		// records only the download's name. All three are tried.
+		paths = append(paths, e.Name(), workRelativePath(e.Name()), path.Base(e.Name()))
 		if id := catalogue.SubsceneIDFromPath(e.Name()); id != "" {
 			ids = append(ids, id)
 			idOf[e.Name()] = id
@@ -421,6 +422,10 @@ func (i *Ingester) resolveUploads(ctx context.Context, entries []archive.Entry) 
 	out := make(map[string]store.Upload, len(entries))
 	for _, e := range entries {
 		if u, ok := byPath[e.Name()]; ok {
+			out[e.Name()] = u
+			continue
+		}
+		if u, ok := byPath[workRelativePath(e.Name())]; ok {
 			out[e.Name()] = u
 			continue
 		}
@@ -713,6 +718,17 @@ func uploadFromFilename(name string) store.Upload {
 		Year:       title.YearFromSlug(slug),
 		Releases:   "[]",
 	}
+}
+
+// workRelativePath is an entry's path from the work's own directory: the last two
+// components, `<slug>/<file>`. It is what the V2 catalogue records, where the
+// archive names the same entry from the root of the dump.
+func workRelativePath(name string) string {
+	dir := path.Dir(name)
+	if dir == "." || dir == "/" {
+		return name
+	}
+	return path.Base(dir) + "/" + path.Base(name)
 }
 
 // derivedIDPrefix marks an upload id subsarr made up because the archive's file
