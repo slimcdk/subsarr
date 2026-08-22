@@ -234,5 +234,5 @@ Every image built from this repository is tagged `sha-<commit>`, and every branc
 and pull request has its own tag, so an exact build can always be pinned:
 
 ```yaml
-image: ghcr.io/slimcdk/subsarr:sha-43261b5
+image: ghcr.io/slimcdk/subsarr:sha-1a2b3c4
 ```
