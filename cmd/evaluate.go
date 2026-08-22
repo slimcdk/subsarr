@@ -107,7 +107,15 @@ func (e *evaluator) run(ctx context.Context, count int) error {
 	if len(films) == 0 {
 		return fmt.Errorf("no uploads to sample from — is the catalogue loaded?")
 	}
-	fmt.Fprintf(e.out, "sampled %d film queries and %d episode queries\n\n", len(films), len(episodes))
+	fmt.Fprintf(e.out, "sampled %d film queries and %d episode queries\n", len(films), len(episodes))
+
+	withIMDB := 0
+	for _, s := range films {
+		if s.imdb != "" {
+			withIMDB++
+		}
+	}
+	fmt.Fprintf(e.out, "%s of the sampled works carry an IMDB id\n\n", percent(withIMDB, len(films)))
 
 	results := []*shapeResult{
 		e.replay(ctx, "imdb", films, func(s sample) store.SearchParams {
@@ -156,7 +164,7 @@ func (e *evaluator) run(ctx context.Context, count int) error {
 			recall := float64(r.comparable-r.recallLost) / float64(r.comparable)
 			p50, p95, _ := percentiles(r.baseline)
 			fmt.Fprintf(e.out, "  recall vs substring     %.4f over %d compared queries\n", recall, r.comparable)
-			fmt.Fprintf(e.out, "  the scan it replaced    p50 %s, p95 %s\n", p50, p95)
+			fmt.Fprintf(e.out, "  the scan it replaced    p50 %s, p95 %s over %d queries\n", p50, p95, len(r.baseline))
 		}
 	}
 	return nil
@@ -167,6 +175,13 @@ func (e *evaluator) replay(ctx context.Context, name string, samples []sample, b
 
 	for _, s := range samples {
 		params := build(s)
+
+		// A shape whose defining parameter is missing is not that shape: an
+		// "IMDB" query with no id is a request for every subtitle in a language,
+		// which no client sends and which would be timed as if it were a search.
+		if params.ImdbID == "" && params.Query == "" {
+			continue
+		}
 
 		started := time.Now()
 		subs, total, err := e.store.SearchSubtitles(ctx, params)
@@ -206,13 +221,22 @@ func (e *evaluator) replay(ctx context.Context, name string, samples []sample, b
 			continue
 		}
 
-		// And the index must not find less than the scan it replaced.
+		// What the search used to cost: a scan of every upload in the language,
+		// matching the query against titles and file names alike.
 		baselineStarted := time.Now()
-		baseline, err := e.substringSearch(ctx, params)
-		if err != nil {
+		if _, err := e.substringSearch(ctx, params, true); err != nil {
 			continue
 		}
 		result.baseline = append(result.baseline, time.Since(baselineStarted))
+
+		// And what it used to find. Only titles, because dropping the file-name
+		// match was a decision, not a regression — and only when the whole match
+		// set fits on one page, or the two paths would be compared on their
+		// orderings rather than on what they found.
+		baseline, err := e.substringSearch(ctx, params, false)
+		if err != nil || len(baseline) >= bazarrPerPage {
+			continue
+		}
 		result.comparable++
 		got := make(map[string]struct{}, len(subs))
 		for _, sub := range subs {
@@ -243,9 +267,14 @@ func (b *argBinder) bind(v any) string {
 }
 
 // substringSearch is the search this service used to do: a scan of every upload
-// in the language, matching the query as a substring of the title or the file
-// name. It is the baseline the title index is measured against.
-func (e *evaluator) substringSearch(ctx context.Context, p store.SearchParams) ([]string, error) {
+// in the language, matching the query as a substring.
+//
+// withFilenames reproduces the old path exactly, file names included, which is
+// what it cost. Without them it matches titles only, which is what the two paths
+// can fairly be compared on: dropping the file-name match was a decision — it is
+// why "Dark" used to return every subtitle whose file happened to say so — and
+// not a regression this should report as lost recall.
+func (e *evaluator) substringSearch(ctx context.Context, p store.SearchParams, withFilenames bool) ([]string, error) {
 	var conds []string
 	b := &argBinder{driver: e.driver}
 	bind := b.bind
@@ -258,7 +287,11 @@ func (e *evaluator) substringSearch(ctx context.Context, p store.SearchParams) (
 		conds = append(conds, "u.language = "+bind(p.Language))
 	}
 	pattern := "%" + p.Query + "%"
-	conds = append(conds, "(u.title "+like+" "+bind(pattern)+" OR f.filename "+like+" "+bind(pattern)+")")
+	if withFilenames {
+		conds = append(conds, "(u.title "+like+" "+bind(pattern)+" OR f.filename "+like+" "+bind(pattern)+")")
+	} else {
+		conds = append(conds, "u.title "+like+" "+bind(pattern))
+	}
 
 	query := "SELECT f.id FROM files f JOIN uploads u ON u.id = f.upload_id WHERE " +
 		strings.Join(conds, " AND ") + " ORDER BY f.downloads DESC LIMIT " + bind(bazarrPerPage)

@@ -146,7 +146,17 @@ Measured on the V2 dump (97 GB, all parts CRC-verified):
 Migrating the reference installation — 4.9 million rows of the flat model — took
 18 minutes and produced 2,450,700 uploads, 4,891,788 files and 148,851 distinct
 titles, with the language column collapsing from 120 spellings to 77 real
-languages. A title search against it answers in about 10 ms over HTTP.
+languages. Replaying 2,000 Bazarr-shaped title queries against it
+(`subsarr evaluate-search`):
+
+| | p50 | p95 | worst |
+|---|---|---|---|
+| Title search | 0.8 ms | 2.8 ms | 104 ms |
+| Title search that matches nothing | 2.1 ms | 4.5 ms | 11 ms |
+| The scan this replaced | 3.0 s | 5.9 s | |
+
+Every one of the 2,000 queries returned the work it was taken from, and the
+narrowed search found everything the old scan found.
 
 An entry that produces no file is counted, not hidden: about 4 % of the archive was truncated when it was collected, a handful of entries are zero bytes, and a few are JSON or HTML error bodies a scraper saved under a `.zip` name. Their catalogue rows are still loaded, so the data model records that Subscene had them.
 
@@ -318,6 +328,15 @@ make docker-build    # production image
 ```
 
 The suite runs against SQLite always, and against PostgreSQL and MariaDB when `SUBSARR_TEST_POSTGRES_DSN` and `SUBSARR_TEST_MYSQL_DSN` are set — which is what `make test-dialects` and CI do. The same conformance suite runs against all three, so the dialects cannot drift apart.
+
+To measure a change to search rather than argue about it, replay Bazarr-shaped
+queries sampled from a real database — it reports p50/p95 per query shape, recall
+against the substring scan the title index replaced, and any query that failed to
+return the work it was taken from:
+
+```bash
+subsarr evaluate-search --queries 2000
+```
 
 The language names subsarr stores are Bazarr's own, vendored in `internal/lang/bazarr_languages.json`. After a Bazarr rename, regenerate them and let the tests tell you what broke:
 

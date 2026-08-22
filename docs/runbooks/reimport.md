@@ -177,6 +177,18 @@ curl -sf -o /dev/null -w '%{http_code}\n' "http://localhost:8090/api/v1/subtitle
 Each of these should return in milliseconds. If a title search takes seconds, the
 title index is missing — run `subsarr migrate` and restart, which rebuilds it.
 
+### Numbers, not impressions
+
+```bash
+docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr \
+  evaluate-search --queries 2000
+```
+
+Replays Bazarr-shaped queries sampled from your own data and reports p50/p95 per
+query shape, recall against the substring scan the title index replaced, and any
+query that did not return the work it was taken from. Expect milliseconds and a
+recall of 1.0000; anything else is worth an issue.
+
 ### Bazarr smoke test
 
 1. **Settings → Providers → subsarr**: the base URL must include the scheme
