@@ -43,15 +43,11 @@ CREATE INDEX IF NOT EXISTS idx_files_upload ON files(upload_id);
 CREATE INDEX IF NOT EXISTS idx_files_content_key ON files(content_key);
 
 -- Title index over the ~150k distinct slugs rather than the millions of uploads.
---
--- `normalised` is what is matched: the title reduced to its comparable words, the
--- same reduction a query goes through, so that "Don't Look Up" and "dont look up"
--- are the same string on both sides. `title` is kept for display and ordering.
+-- Version 5 replaces what is actually searched; see it for why.
 CREATE TABLE IF NOT EXISTS titles (
-    slug       TEXT PRIMARY KEY,
-    title      TEXT NOT NULL DEFAULT '',
-    normalised TEXT NOT NULL DEFAULT '',
-    tsv        tsvector GENERATED ALWAYS AS (to_tsvector('simple', normalised)) STORED
+    slug  TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    tsv   tsvector GENERATED ALWAYS AS (to_tsvector('simple', title)) STORED
 );
 CREATE INDEX IF NOT EXISTS idx_titles_tsv ON titles USING GIN (tsv);
 
@@ -69,11 +65,14 @@ $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
+-- The operator class is only reachable when pg_trgm was installed into a schema
+-- on this connection's search_path, which is not something a migration can
+-- guarantee. Without the index the substring fallback still answers, using LIKE.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
-        CREATE INDEX IF NOT EXISTS idx_titles_trgm ON titles USING GIN (normalised gin_trgm_ops);
-    END IF;
+    CREATE INDEX IF NOT EXISTS idx_titles_trgm ON titles USING GIN (title gin_trgm_ops);
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'pg_trgm index not created: substring title search falls back to LIKE';
 END
 $$;
 -- +goose StatementEnd

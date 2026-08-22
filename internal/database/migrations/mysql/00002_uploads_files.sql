@@ -44,14 +44,11 @@ CREATE TABLE IF NOT EXISTS files (
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- `normalised` is what is matched: the title reduced to its comparable words, the
--- same reduction a query goes through, so that "Don't Look Up" and "dont look up"
--- are the same string on both sides. `title` is kept for display and ordering.
+-- Version 5 replaces what is actually searched; see it for why.
 CREATE TABLE IF NOT EXISTS titles (
-    slug       VARCHAR(255) PRIMARY KEY,
-    title      VARCHAR(512) NOT NULL,
-    normalised VARCHAR(512) NOT NULL,
-    FULLTEXT KEY ft_titles_normalised (normalised)
+    slug  VARCHAR(255) PRIMARY KEY,
+    title VARCHAR(512) NOT NULL,
+    FULLTEXT KEY ft_titles_title (title)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- +goose StatementEnd
 

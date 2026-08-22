@@ -57,7 +57,9 @@ type Options struct {
 	DryRun bool
 
 	// Resume skips entries whose upload already has stored files, so a restarted
-	// import does not decompress and hash what a previous run already did.
+	// import does not decompress and hash what a previous run already did. It is
+	// the default, because an 8-12 hour import that has to start over is not
+	// resumable in any useful sense; a new dump wants it off.
 	Resume bool
 
 	// Batch is how many archive entries are processed per transaction.
@@ -83,6 +85,7 @@ type Stats struct {
 
 	SkippedLanguage int
 	Resumed         int // entries skipped because a previous run already stored them
+	Deleted         int // legacy storage objects removed after their file moved
 	Empty           int
 	Truncated       int
 	ErrorBodies     int
@@ -92,12 +95,19 @@ type Stats struct {
 	Errors          int
 }
 
+// Skipped is every entry that produced no subtitle file, for whatever reason.
+func (s Stats) Skipped() int {
+	return s.SkippedLanguage + s.Resumed + s.Empty + s.Truncated +
+		s.ErrorBodies + s.NoSubtitle + s.TooLarge + s.Unreadable
+}
+
 func (s Stats) String() string {
 	return fmt.Sprintf(
-		"%d entries  %d files (%d new, %d updated, %d unchanged)  %d stored  %d migrated  "+
-			"skipped: %d language, %d resumed, %d empty, %d truncated, %d error bodies, %d not subtitles, %d too large, %d unreadable, %d errors",
-		s.Entries, s.Files, s.Inserted, s.Updated, s.Unchanged, s.Stored, s.Migrated,
-		s.SkippedLanguage, s.Resumed, s.Empty, s.Truncated, s.ErrorBodies, s.NoSubtitle, s.TooLarge, s.Unreadable, s.Errors)
+		"%d entries  %d files (%d new, %d updated, %d unchanged)  %d stored  %d migrated  %d deleted  "+
+			"%d skipped (%d language, %d resumed, %d empty, %d truncated, %d error bodies, %d not subtitles, %d too large, %d unreadable)  %d errors",
+		s.Entries, s.Files, s.Inserted, s.Updated, s.Unchanged, s.Stored, s.Migrated, s.Deleted,
+		s.Skipped(), s.SkippedLanguage, s.Resumed, s.Empty, s.Truncated, s.ErrorBodies,
+		s.NoSubtitle, s.TooLarge, s.Unreadable, s.Errors)
 }
 
 // Ingester runs an import against a store and a storage backend.
@@ -535,6 +545,7 @@ func (i *Ingester) writeFiles(ctx context.Context, candidates []candidate) error
 	for _, key := range legacy {
 		if err := i.stor.Delete(ctx, key); err == nil {
 			i.stats.Migrated++
+			i.stats.Deleted++
 		}
 	}
 	return nil

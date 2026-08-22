@@ -65,9 +65,6 @@ archive on a NAS; the service keeps answering while it runs.`,
 			}
 			defer s.Close()
 
-			if err := checkLanguages(ctx, s.store, languages); err != nil {
-				return err
-			}
 			if len(languages) > 0 {
 				log.Printf("[import] storing files for %d language(s): %s", len(languages), strings.Join(languages, ", "))
 			}
@@ -84,6 +81,13 @@ archive on a NAS; the service keeps answering while it runs.`,
 				if err := loadCatalogue(ctx, in, s.store, d, reload); err != nil {
 					return err
 				}
+			}
+
+			// After the catalogue and before a single entry is opened: a typo in
+			// the whitelist has to stop the run now, not eight hours later with
+			// nothing imported.
+			if err := checkLanguages(ctx, s.store, languages); err != nil {
+				return err
 			}
 
 			source, err := d.open()
@@ -121,7 +125,7 @@ archive on a NAS; the service keeps answering while it runs.`,
 	cmd.Flags().String("subtitles", "", "V1 dump: path to the subtitles/ directory")
 	cmd.Flags().String("languages", "", "Only store files for these languages (comma separated; empty = all)")
 	cmd.Flags().Bool("dry-run", false, "Read and count without writing anything")
-	cmd.Flags().Bool("resume", false, "Skip entries whose upload already has stored files")
+	cmd.Flags().Bool("resume", true, "Continue where a previous run stopped, skipping entries whose upload already has stored files; --resume=false re-reads everything, which is what a new dump needs")
 	cmd.Flags().Bool("skip-metadata", false, "Skip the catalogue pass (for a dump that has none)")
 	cmd.Flags().Bool("reload-metadata", false, "Reload the catalogue even if it is already loaded")
 	cmd.Flags().Int("batch", 500, "Archive entries per transaction")
@@ -170,8 +174,9 @@ func resolveLanguages(cmd *cobra.Command, cfg config.Config) ([]string, error) {
 }
 
 // checkLanguages refuses a whitelist naming a language the catalogue has never
-// seen, before any pass runs. A typo would otherwise import nothing at all and
-// only say so eight hours later.
+// seen. It runs once the catalogue is loaded and before any entry is opened,
+// which is the only moment where both facts are available and nothing has been
+// wasted yet.
 func checkLanguages(ctx context.Context, st store.Store, languages []string) error {
 	if len(languages) == 0 {
 		return nil
@@ -181,7 +186,9 @@ func checkLanguages(ctx context.Context, st store.Store, languages []string) err
 		return err
 	}
 	if len(known) == 0 {
-		// Nothing is loaded yet, so there is nothing to check against.
+		// No catalogue at all — a dump imported with --skip-metadata. The names
+		// were checked against the language table when they were parsed; there is
+		// nothing else to check them against.
 		return nil
 	}
 

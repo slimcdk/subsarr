@@ -97,8 +97,8 @@ func TestMigrate_Status(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if len(lines) != 4 {
-		t.Fatalf("got %d migrations, want 4:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 5 {
+		t.Fatalf("got %d migrations, want 5:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	for _, line := range lines {
 		if strings.Contains(line, "pending") {

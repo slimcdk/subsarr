@@ -85,8 +85,13 @@ type harness struct {
 
 func newHarness(t *testing.T) harness {
 	t.Helper()
+	return newHarnessOn(t, storetest.SQLite(t))
+}
+
+func newHarnessOn(t *testing.T, st store.Store) harness {
+	t.Helper()
 	root := t.TempDir()
-	return harness{st: storetest.SQLite(t), storage: storage.NewFilesystem(root), root: root}
+	return harness{st: st, storage: storage.NewFilesystem(root), root: root}
 }
 
 func (h harness) run(t *testing.T, src archive.Source, opts ingest.Options) ingest.Stats {
@@ -519,4 +524,44 @@ func TestIngest_V1Dump(t *testing.T) {
 	if subs[0].Title != "The Dark Knight" || subs[0].Author != "someone" {
 		t.Errorf("the V1 catalogue's metadata did not reach the row: %+v", subs[0])
 	}
+}
+
+// Ingest writes through the same dialect-parameterised store a search reads
+// through, so the behaviour an operator depends on — the catalogue's metadata
+// reaching the rows, a re-run changing nothing, a whitelist filtering what is
+// stored — has to hold on every database, not just the one the rest of this file
+// uses.
+func TestIngest_BehavesTheSameOnEveryDialect(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st store.Store) {
+		h := newHarnessOn(t, st)
+
+		h.run(t, fixture(t), ingest.Options{Batch: 2})
+
+		subs, total := h.search(t, store.SearchParams{ImdbID: "tt0468569", Language: "english"})
+		if total != 1 {
+			t.Fatalf("total = %d, want 1", total)
+		}
+		if subs[0].Title != "The Dark Knight" || subs[0].Author != "someone" {
+			t.Errorf("the catalogue's metadata did not reach the row: %+v", subs[0])
+		}
+		firstID := subs[0].ID
+
+		// A second run changes nothing and renumbers nothing.
+		stats := h.run(t, fixture(t), ingest.Options{})
+		if stats.Inserted != 0 || stats.Stored != 0 {
+			t.Errorf("second run inserted %d files and stored %d objects, want 0 and 0", stats.Inserted, stats.Stored)
+		}
+		again, total := h.search(t, store.SearchParams{ImdbID: "tt0468569", Language: "english"})
+		if total != 1 || again[0].ID != firstID {
+			t.Errorf("the file id changed from %s to %v on re-import", firstID, ids(again))
+		}
+	})
+}
+
+func ids(subs []store.Subtitle) []string {
+	out := make([]string, len(subs))
+	for i, s := range subs {
+		out[i] = s.ID
+	}
+	return out
 }

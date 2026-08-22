@@ -1,10 +1,8 @@
 name: Test
 
+# Called by the image build, which is what every push and pull request triggers.
+# Running on push as well would run the whole three-database suite twice.
 on:
-  push:
-    branches: ["**"]
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
-  pull_request:
   workflow_call:
 
 env:
@@ -65,6 +63,8 @@ jobs:
           CGO_ENABLED: 1
           SUBSARR_TEST_POSTGRES_DSN: postgres://subsarr:subsarr@localhost:5432/subsarr?sslmode=disable
           SUBSARR_TEST_MYSQL_DSN: root:root@tcp(localhost:3306)/subsarr
+          # Without a DSN the suite skips that dialect; here it must fail instead.
+          SUBSARR_TEST_REQUIRE_DIALECTS: "1"
         # -race is what catches the concurrent catalogue cache and the detached
         # download counter.
         run: go test -tags "$GO_TAGS" -race -count=1 ./...
@@ -81,4 +81,6 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned: `latest` turns a new release into a red build on a commit
+          # that changed nothing.
+          version: v2.12.2

@@ -24,6 +24,11 @@ import (
 const (
 	envPostgresDSN = "SUBSARR_TEST_POSTGRES_DSN"
 	envMySQLDSN    = "SUBSARR_TEST_MYSQL_DSN"
+
+	// envRequire makes a missing DSN a failure rather than a skip. CI sets it,
+	// so that dropping the service block from a workflow cannot quietly reduce
+	// the suite to SQLite while it still gates image publication.
+	envRequire = "SUBSARR_TEST_REQUIRE_DIALECTS"
 )
 
 var testDBCounter atomic.Int64
@@ -43,7 +48,7 @@ func Each(t *testing.T, fn func(t *testing.T, st store.Store)) {
 			fn(t, newStore(t, "postgres", postgresTestDSN(t, dsn)))
 		})
 	} else {
-		t.Logf("skipping postgres: %s not set", envPostgresDSN)
+		missing(t, envPostgresDSN, "postgres")
 	}
 
 	if dsn := os.Getenv(envMySQLDSN); dsn != "" {
@@ -51,8 +56,16 @@ func Each(t *testing.T, fn func(t *testing.T, st store.Store)) {
 			fn(t, newStore(t, "mysql", mysqlTestDSN(t, dsn)))
 		})
 	} else {
-		t.Logf("skipping mysql: %s not set", envMySQLDSN)
+		missing(t, envMySQLDSN, "mysql")
 	}
+}
+
+func missing(t *testing.T, env, dialect string) {
+	t.Helper()
+	if os.Getenv(envRequire) != "" {
+		t.Fatalf("%s is set but %s is not: %s cannot be covered", envRequire, env, dialect)
+	}
+	t.Logf("skipping %s: %s not set", dialect, env)
 }
 
 // SQLite returns a migrated store on a throwaway file. Every environment can run

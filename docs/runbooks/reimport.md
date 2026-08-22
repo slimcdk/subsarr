@@ -83,7 +83,7 @@ docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr migrate
 docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr migrate status
 ```
 
-The first `status` shows every migration pending; the second shows all four
+The first `status` shows every migration pending; the second shows all five
 applied. The data migration between them moves the flat table into the catalogue
 model, keeping every file id. On the reference database — 4.9 million rows — it
 takes about a quarter of an hour and prints its progress as it goes.

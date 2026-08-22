@@ -81,7 +81,8 @@ type shapeResult struct {
 	queries    int
 	hits       int
 	latencies  []time.Duration
-	misses     int // exact-title misses
+	checked    int // queries taken from a known upload
+	misses     int // those that did not return it
 	recallLost int // results the old substring path found and this one did not
 	comparable int
 }
@@ -137,11 +138,12 @@ func (e *evaluator) run(ctx context.Context, count int) error {
 	}
 
 	for _, r := range results {
-		if r.comparable == 0 && r.misses == 0 {
+		if r.checked == 0 {
 			continue
 		}
 		fmt.Fprintf(e.out, "\n%s\n", r.name)
-		fmt.Fprintf(e.out, "  exact-title misses      %d (want 0)\n", r.misses)
+		fmt.Fprintf(e.out, "  recall                  %.4f — %d of %d queries did not return the upload they were taken from\n",
+			float64(r.checked-r.misses)/float64(r.checked), r.misses, r.checked)
 		if r.comparable > 0 {
 			recall := float64(r.comparable-r.recallLost) / float64(r.comparable)
 			fmt.Fprintf(e.out, "  recall vs substring     %.4f over %d compared queries\n", recall, r.comparable)
@@ -170,11 +172,15 @@ func (e *evaluator) replay(ctx context.Context, name string, samples []sample, b
 			result.hits++
 		}
 
-		if params.Query == "" || s.slug == "" {
+		if s.slug == "" {
 			continue
 		}
 
-		// The work the query was taken from has to be in the answer.
+		// The work the query was taken from has to be in the answer. For the
+		// IMDB shapes this is the recall measure: the query is the id of an
+		// upload that exists, so a miss is the service failing to find its own
+		// row.
+		result.checked++
 		found := false
 		for _, sub := range subs {
 			if sub.Slug == s.slug {
@@ -184,6 +190,10 @@ func (e *evaluator) replay(ctx context.Context, name string, samples []sample, b
 		}
 		if !found {
 			result.misses++
+		}
+
+		if params.Query == "" {
+			continue
 		}
 
 		// And the index must not find less than the scan it replaced.

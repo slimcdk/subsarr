@@ -2,11 +2,13 @@
 # in devcontainer.json all work; this adds what this repo needs on top.
 FROM mcr.microsoft.com/devcontainers/go:2-1.26-bookworm
 
-# sqlite3 for looking at a database by hand; zip for building test fixtures.
+# sqlite3 for looking at a database by hand, zip for building test fixtures,
+# python3 for scripts/vendor-bazarr-languages.py.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     zip \
     sqlite3 \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # The tools the Makefile and the editor settings expect. goose is a library here,

@@ -267,6 +267,7 @@ VER   MIGRATION                APPLIED
 2     00002_uploads_files      2026-08-22 19:45:56Z
 3     legacy data migration    2026-08-22 19:45:57Z
 4     00004_drop_legacy        2026-08-22 19:45:57Z
+5     00005_normalised_titles  2026-08-22 19:45:57Z
 ```
 
 ---
