@@ -94,7 +94,7 @@ func (h harness) run(t *testing.T, src archive.Source, opts ingest.Options) inge
 	ctx := context.Background()
 
 	in := ingest.New(h.st, h.storage, opts)
-	if _, err := in.LoadCatalogue(ctx, strings.NewReader(catalogueDump)); err != nil {
+	if _, err := in.LoadCatalogue(ctx, strings.NewReader(catalogueDump), ingest.CatalogueSQL); err != nil {
 		t.Fatalf("LoadCatalogue: %v", err)
 	}
 	if err := in.Run(ctx, src); err != nil {
@@ -481,4 +481,42 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// The older "Subscene Final" dump: a metadata.json catalogue whose paths are
+// bare download names, and a subtitles/ directory of those files.
+func TestIngest_V1Dump(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	const metadata = `[
+	  {"subscene_id":"1001","title":"The Dark Knight","language":"English","author":"someone",
+	   "releases":["TDK.720p"],"download":"the-dark-knight_english-1001.zip",
+	   "original":"https://subscene.com/subtitles/the-dark-knight/english/1001",
+	   "imdb":"https://www.imdb.com/title/tt0468569/","date":"7/20/2008 1:45 PM"}
+	]`
+
+	in := ingest.New(h.st, h.storage, ingest.Options{})
+	if _, err := in.LoadCatalogue(ctx, strings.NewReader(metadata), ingest.CatalogueJSON); err != nil {
+		t.Fatalf("LoadCatalogue: %v", err)
+	}
+
+	src := archive.MemorySource{
+		{Path: "subtitles/the-dark-knight_english-1001.zip",
+			Content: zipOf(t, map[string]string{"TDK.srt": srtA})},
+	}
+	if err := in.Run(ctx, src); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := h.st.Reindex(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	subs, total := h.search(t, store.SearchParams{ImdbID: "tt0468569", Language: "english"})
+	if total != 1 {
+		t.Fatalf("total = %d, want 1", total)
+	}
+	if subs[0].Title != "The Dark Knight" || subs[0].Author != "someone" {
+		t.Errorf("the V1 catalogue's metadata did not reach the row: %+v", subs[0])
+	}
 }

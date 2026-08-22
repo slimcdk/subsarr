@@ -259,3 +259,51 @@ func TestParseDate(t *testing.T) {
 		}
 	}
 }
+
+// The older "Subscene Final" dump ships a metadata.json instead of a SQL dump.
+// It carries the same facts and has to become the same rows.
+func TestReadJSON(t *testing.T) {
+	const metadata = `[
+	  {"subscene_id":"1120553","title":"The Dark Knight","language":"English","author":"someone",
+	   "releases":["TDK.720p","TDK.1080p"],"comment":"Synced","download":"the-dark-knight_english-1120553.zip",
+	   "original":"https://subscene.com/subtitles/the-dark-knight/english/1120553","imdb":"https://www.imdb.com/title/tt0468569/",
+	   "date":"7/20/2008 1:45 PM"},
+	  {"subscene_id":"","title":"","language":"Danish","download":"its-a-wonderful-life-1946_HI_danish-99.zip",
+	   "original":"https://subscene.com/subtitles/its-a-wonderful-life-1946/danish/99","imdb":"","date":""},
+	  {"subscene_id":"","title":"No id anywhere","language":"Danish","download":"broken.zip"}
+	]`
+
+	var rows []Upload
+	result, err := ReadJSON(strings.NewReader(metadata), func(u Upload) error {
+		rows = append(rows, u)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ReadJSON: %v", err)
+	}
+	if result.Rows != 2 || result.Skipped != 1 {
+		t.Errorf("rows = %d, skipped = %d; want 2 and 1", result.Rows, result.Skipped)
+	}
+
+	first := rows[0]
+	if first.SubsceneID != "1120553" || first.Slug != "the-dark-knight" || first.ImdbID != "tt0468569" {
+		t.Errorf("got %+v", first)
+	}
+	if first.Language != "english" || len(first.Releases) != 2 || first.Comment != "Synced" {
+		t.Errorf("got %+v", first)
+	}
+	if first.UploadedAt != "2008-07-20T13:45:00Z" {
+		t.Errorf("uploaded_at = %q", first.UploadedAt)
+	}
+	if first.FilePath != "the-dark-knight_english-1120553.zip" {
+		t.Errorf("file path = %q — the V1 catalogue records the download's name", first.FilePath)
+	}
+
+	second := rows[1]
+	if second.SubsceneID != "99" {
+		t.Errorf("subscene id = %q, want it recovered from the download name", second.SubsceneID)
+	}
+	if !second.HI || second.Year != 1946 || second.Title != "Its A Wonderful Life 1946" {
+		t.Errorf("got %+v", second)
+	}
+}

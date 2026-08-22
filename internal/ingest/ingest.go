@@ -130,12 +130,22 @@ func (i *Ingester) Stats() Stats { return i.stats }
 
 // ─── pass 1: the catalogue ───────────────────────────────────────────────────
 
-// LoadCatalogue reads the archive's SQL dump into `uploads`.
+// CatalogueFormat is how a dump's catalogue is written: the V2 archive ships a
+// SQL dump, the V1 one a metadata.json. Both carry the same facts and become the
+// same rows.
+type CatalogueFormat int
+
+const (
+	CatalogueSQL CatalogueFormat = iota
+	CatalogueJSON
+)
+
+// LoadCatalogue reads a dump's catalogue into `uploads`.
 //
 // The whitelist is deliberately ignored here: the catalogue is what makes the
 // data model complete, and loading it in full is what lets an operator widen the
 // whitelist later without re-reading the metadata.
-func (i *Ingester) LoadCatalogue(ctx context.Context, r io.Reader) (catalogue.Result, error) {
+func (i *Ingester) LoadCatalogue(ctx context.Context, r io.Reader, format CatalogueFormat) (catalogue.Result, error) {
 	batch := make([]store.Upload, 0, i.opts.Batch)
 
 	flush := func() error {
@@ -150,7 +160,12 @@ func (i *Ingester) LoadCatalogue(ctx context.Context, r io.Reader) (catalogue.Re
 		return nil
 	}
 
-	result, err := catalogue.Read(r, func(row catalogue.Upload) error {
+	read := catalogue.Read
+	if format == CatalogueJSON {
+		read = catalogue.ReadJSON
+	}
+
+	result, err := read(r, func(row catalogue.Upload) error {
 		upload, ok := uploadFromCatalogue(row)
 		if !ok {
 			return nil
@@ -328,12 +343,14 @@ func (i *Ingester) processBatch(ctx context.Context, entries []archive.Entry) er
 // whose paths carry a different prefix than the catalogue's would otherwise look
 // like a dump with no metadata at all.
 func (i *Ingester) resolveUploads(ctx context.Context, entries []archive.Entry) (map[string]store.Upload, error) {
-	paths := make([]string, 0, len(entries))
+	paths := make([]string, 0, len(entries)*2)
 	ids := make([]string, 0, len(entries))
 	idOf := make(map[string]string, len(entries))
 
 	for _, e := range entries {
-		paths = append(paths, e.Name())
+		// Both the full path and the bare file name: the V2 catalogue records a
+		// path inside the archive, the V1 one records only the download's name.
+		paths = append(paths, e.Name(), path.Base(e.Name()))
 		if id := subsceneIDFromName(e.Name()); id != "" {
 			ids = append(ids, id)
 			idOf[e.Name()] = id
@@ -352,6 +369,10 @@ func (i *Ingester) resolveUploads(ctx context.Context, entries []archive.Entry) 
 	out := make(map[string]store.Upload, len(entries))
 	for _, e := range entries {
 		if u, ok := byPath[e.Name()]; ok {
+			out[e.Name()] = u
+			continue
+		}
+		if u, ok := byPath[path.Base(e.Name())]; ok {
 			out[e.Name()] = u
 			continue
 		}

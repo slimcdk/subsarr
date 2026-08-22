@@ -29,6 +29,7 @@ disk space is needed beyond the database and the subtitle files themselves.
 
   subsarr import-dump --archive "/mnt/dump/Subscene V2.7z.001"
   subsarr import-dump --files-db "/mnt/dump/Subscene Files DB/"
+  subsarr import-dump --metadata /mnt/dump/metadata.json --subtitles /mnt/dump/subtitles/
 
 The import runs in two passes. The first loads the archive's catalogue — one row
 per Subscene upload, with the title, IMDB id, release list, uploader, comment and
@@ -44,8 +45,13 @@ archive on a NAS; the service keeps answering while it runs.`,
 
 			archivePath, _ := flags.GetString("archive")
 			filesDB, _ := flags.GetString("files-db")
+			metadata, _ := flags.GetString("metadata")
+			subtitles, _ := flags.GetString("subtitles")
+			if metadata != "" && subtitles != "" {
+				filesDB = subtitles
+			}
 			if archivePath == "" && filesDB == "" {
-				return fmt.Errorf("provide --archive (a split 7z) or --files-db (an extracted directory)")
+				return fmt.Errorf("provide --archive (a split 7z), --files-db (an extracted directory), or --metadata with --subtitles (a V1 dump)")
 			}
 
 			languages, err := resolveLanguages(cmd, cfg)
@@ -81,6 +87,9 @@ archive on a NAS; the service keeps answering while it runs.`,
 			skipMetadata, _ := flags.GetBool("skip-metadata")
 			reload, _ := flags.GetBool("reload-metadata")
 			cataloguePath, _ := flags.GetString("catalogue")
+			if metadata != "" {
+				cataloguePath = metadata
+			}
 			if !skipMetadata {
 				if err := loadCatalogue(ctx, in, s.store, archivePath, filesDB, cataloguePath, reload); err != nil {
 					return err
@@ -91,7 +100,7 @@ archive on a NAS; the service keeps answering while it runs.`,
 			if err != nil {
 				return err
 			}
-			defer source.Close()
+			defer func() { _ = source.Close() }()
 
 			if err := in.Run(ctx, source); err != nil {
 				return err
@@ -117,7 +126,9 @@ archive on a NAS; the service keeps answering while it runs.`,
 
 	cmd.Flags().String("archive", "", "Path to the first volume of the split 7z — streamed, never extracted")
 	cmd.Flags().String("files-db", "", "Path to an already-extracted dump directory")
-	cmd.Flags().String("catalogue", "", "Read the catalogue from this SQL file instead of from the archive")
+	cmd.Flags().String("catalogue", "", "Read the catalogue from this file instead of from the archive")
+	cmd.Flags().String("metadata", "", "V1 dump: path to metadata.json")
+	cmd.Flags().String("subtitles", "", "V1 dump: path to the subtitles/ directory")
 	cmd.Flags().String("languages", "", "Only store files for these languages (comma separated; empty = all)")
 	cmd.Flags().Bool("dry-run", false, "Read and count without writing anything")
 	cmd.Flags().Bool("resume", false, "Skip entries whose upload already has stored files")
@@ -196,7 +207,7 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, arc
 		defer f.Close()
 
 		log.Printf("[import] pass 1/2: loading the catalogue from %s …", cataloguePath)
-		result, err := in.LoadCatalogue(ctx, f)
+		result, err := in.LoadCatalogue(ctx, f, catalogueFormat(cataloguePath))
 		if err != nil {
 			return err
 		}
@@ -209,7 +220,7 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, arc
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 
 	log.Print("[import] pass 1/2: loading the catalogue …")
 	found := false
@@ -223,7 +234,7 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, arc
 		}
 		defer rc.Close()
 
-		result, err := in.LoadCatalogue(ctx, rc)
+		result, err := in.LoadCatalogue(ctx, rc, catalogueFormat(e.Name()))
 		if err != nil {
 			return fmt.Errorf("read %s: %w", e.Name(), err)
 		}
@@ -241,10 +252,19 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, arc
 	return nil
 }
 
-// isCatalogue recognises the archive's SQL dump. The name differs between
-// mirrors of the dump, so the extension is what identifies it.
+// isCatalogue recognises a dump's catalogue: the V2 archive ships a SQL dump,
+// the V1 one a metadata.json. The SQL file's name differs between mirrors, so
+// the extension is what identifies it.
 func isCatalogue(name string) bool {
-	return strings.EqualFold(path.Ext(name), ".sql")
+	return strings.EqualFold(path.Ext(name), ".sql") ||
+		strings.EqualFold(path.Base(name), "metadata.json")
+}
+
+func catalogueFormat(name string) ingest.CatalogueFormat {
+	if strings.EqualFold(path.Ext(name), ".json") {
+		return ingest.CatalogueJSON
+	}
+	return ingest.CatalogueSQL
 }
 
 func describeMapping(result catalogue.Result) string {
