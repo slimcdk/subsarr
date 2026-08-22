@@ -24,6 +24,12 @@ import (
 // is not a subtitle; the biggest real ones are a few hundred kilobytes.
 const MaxFileSize = 20 << 20
 
+// MaxEntrySize is the largest archive entry that will be opened. An entry is an
+// archive of its own and can legitimately hold a whole season, so the cap is far
+// above MaxFileSize — it exists to stop one pathological entry from being read
+// into memory, not to filter anything real.
+const MaxEntrySize = 256 << 20
+
 // File is one subtitle file extracted from an entry.
 type File struct {
 	Name    string

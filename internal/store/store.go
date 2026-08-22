@@ -131,6 +131,7 @@ type Store interface {
 	PruneLanguages(ctx context.Context, keep []string, batch int) (PruneBatch, error)
 	Reindex(ctx context.Context) error
 	Optimize(ctx context.Context) error
+	Checkpoint(ctx context.Context) error
 
 	// DB exposes the connection for the migrator and for tests.
 	DB() *sql.DB

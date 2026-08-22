@@ -106,3 +106,42 @@ func (sqliteDialect) analyze(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, "ANALYZE")
 	return err
 }
+
+// needsAnalyze reports whether ANALYZE has ever run. SQLite reads every index to
+// build its statistics, which on five million rows is a minute that a restart
+// should not spend when nothing has changed since the last one.
+func (sqliteDialect) needsAnalyze(ctx context.Context, db *sql.DB) (bool, error) {
+	var n int
+	err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'").Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return true, nil
+	}
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_stat1").Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
+// checkpoint folds the write-ahead log back into the database file and truncates
+// it.
+//
+// SQLite checkpoints on its own as transactions commit, but only opportunistically
+// and never while another connection is reading. An import writes millions of rows
+// with random primary keys — every batch dirties pages all over a multi-gigabyte
+// file — and reads between batches, so the log grows without bound: on the full
+// archive it reached eighteen gigabytes before this was added.
+func (sqliteDialect) checkpoint(ctx context.Context, db *sql.DB) error {
+	var busy, size, checkpointed int
+	if err := db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &size, &checkpointed); err != nil {
+		return fmt.Errorf("checkpoint: %w", err)
+	}
+	if busy != 0 {
+		// Something was reading. The next one will get it; saying so is enough.
+		return fmt.Errorf("checkpoint blocked by a reader (%d pages still in the log)", size)
+	}
+	return nil
+}

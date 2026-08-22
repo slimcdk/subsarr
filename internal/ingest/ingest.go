@@ -37,6 +37,15 @@ import (
 // holds about 2.5 million entries, so this is roughly 250 lines for a whole run.
 const progressEvery = 10_000
 
+// checkpointEvery is how many entries pass between two checkpoints of whatever
+// the database writes ahead of its data file.
+const checkpointEvery = 50_000
+
+// maxPendingBytes bounds how much subtitle content a batch holds before it is
+// written out. A batch is a number of entries, and an entry can hold a whole
+// season, so counting entries alone does not bound memory.
+const maxPendingBytes = 64 << 20
+
 // Options configure one import run.
 type Options struct {
 	// Languages is the whitelist of languages whose files are extracted and
@@ -101,6 +110,8 @@ type Ingester struct {
 	start time.Time
 	// nextReport is the entry count at which the next progress line is due.
 	nextReport int
+	// nextCheckpoint is the entry count at which the log is next folded back in.
+	nextCheckpoint int
 }
 
 func New(st store.Store, stor storage.Store, opts Options) *Ingester {
@@ -117,12 +128,13 @@ func New(st store.Store, stor storage.Store, opts Options) *Ingester {
 	}
 
 	return &Ingester{
-		st:         st,
-		stor:       stor,
-		opts:       opts,
-		allow:      allow,
-		start:      time.Now(),
-		nextReport: progressEvery,
+		st:             st,
+		stor:           stor,
+		opts:           opts,
+		allow:          allow,
+		start:          time.Now(),
+		nextReport:     progressEvery,
+		nextCheckpoint: checkpointEvery,
 	}
 }
 
@@ -275,7 +287,25 @@ func (i *Ingester) processBatch(ctx context.Context, entries []archive.Entry) er
 	// before their files so the join has something to point at.
 	var invented []store.Upload
 	var candidates []candidate
+	var pending int
 	seen := make(map[string]struct{}, len(entries))
+
+	flush := func() error {
+		if err := i.writeUploads(ctx, invented); err != nil {
+			return err
+		}
+		invented = invented[:0]
+
+		if len(candidates) > 0 {
+			resolveFileIDs(candidates, existing)
+			if err := i.writeFiles(ctx, candidates); err != nil {
+				return err
+			}
+			candidates = candidates[:0]
+			pending = 0
+		}
+		return nil
+	}
 
 	for _, entry := range entries {
 		upload, ok := uploads[entry.Name()]
@@ -317,25 +347,36 @@ func (i *Ingester) processBatch(ctx context.Context, entries []archive.Entry) er
 				hash:   hash,
 				key:    ContentKey(hash, f.Name),
 			})
+			pending += len(f.Content)
+		}
+
+		if pending >= maxPendingBytes {
+			if err := flush(); err != nil {
+				return err
+			}
 		}
 	}
 
-	if len(candidates) == 0 {
-		i.report()
-		return i.writeUploads(ctx, invented)
-	}
-
-	resolveFileIDs(candidates, existing)
-
-	if err := i.writeUploads(ctx, invented); err != nil {
-		return err
-	}
-	if err := i.writeFiles(ctx, candidates); err != nil {
+	if err := flush(); err != nil {
 		return err
 	}
 
 	i.report()
+	i.checkpoint(ctx)
 	return nil
+}
+
+// checkpoint keeps the database's write-ahead log from growing for the whole
+// length of an import. A checkpoint that cannot run right now is not a failure —
+// the next one will get it — so it is reported and the import carries on.
+func (i *Ingester) checkpoint(ctx context.Context) {
+	if i.opts.DryRun || i.stats.Entries < i.nextCheckpoint {
+		return
+	}
+	i.nextCheckpoint = i.stats.Entries + checkpointEvery
+	if err := i.st.Checkpoint(ctx); err != nil {
+		log.Printf("[import] %v", err)
+	}
 }
 
 // resolveUploads finds the catalogue row for each entry, keyed by the entry's
@@ -534,11 +575,11 @@ func (i *Ingester) read(entry archive.Entry) ([]subfile.File, subfile.Reason) {
 	}
 	defer rc.Close()
 
-	data, err := io.ReadAll(io.LimitReader(rc, subfile.MaxFileSize+1))
+	data, err := io.ReadAll(io.LimitReader(rc, subfile.MaxEntrySize+1))
 	if err != nil {
 		return nil, subfile.ReasonUnreadable
 	}
-	if len(data) > subfile.MaxFileSize {
+	if len(data) > subfile.MaxEntrySize {
 		return nil, subfile.ReasonTooLarge
 	}
 	return subfile.Extract(entry.Name(), data)

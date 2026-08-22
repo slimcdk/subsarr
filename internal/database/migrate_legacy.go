@@ -77,59 +77,43 @@ func migrateLegacyRows(ctx context.Context, db *sql.DB, driver string) error {
 		return err
 	}
 
-	rows, err := db.QueryContext(ctx, "SELECT "+selectList+" FROM subtitles")
-	if err != nil {
-		return fmt.Errorf("read legacy subtitles: %w", err)
-	}
-	defer rows.Close()
-
 	var (
-		batch    []legacyRow
+		lastID   string
 		uploads  int
 		files    int
 		orphaned int
 	)
-	flush := func() error {
-		if len(batch) == 0 {
-			return nil
+	for {
+		batch, err := readLegacyPage(ctx, db, driver, selectList, lastID)
+		if err != nil {
+			return err
 		}
-		u, f, err := writeLegacyBatch(ctx, db, driver, batch)
+		if len(batch) == 0 {
+			break
+		}
+		lastID = batch[len(batch)-1].ID
+
+		usable := batch[:0]
+		for _, r := range batch {
+			if r.SubsceneID == "" {
+				// Without a Subscene id there is no upload to attach the file to.
+				orphaned++
+				continue
+			}
+			usable = append(usable, r)
+		}
+
+		u, f, err := writeLegacyBatch(ctx, db, driver, usable)
 		if err != nil {
 			return err
 		}
 		uploads += u
 		files += f
-		batch = batch[:0]
-		if (uploads/legacyBatch)%50 == 0 {
-			log.Printf("[migrate] legacy data: %d uploads, %d files", uploads, files)
-		}
-		return nil
-	}
 
-	for rows.Next() {
-		var r legacyRow
-		if err := rows.Scan(&r.ID, &r.SubsceneID, &r.Title, &r.Slug, &r.ImdbID, &r.Language,
-			&r.HI, &r.Author, &r.Releases, &r.Comment, &r.Year, &r.Filename, &r.Format,
-			&r.ContentKey, &r.ContentHash, &r.UploadedAt, &r.Downloads); err != nil {
-			return fmt.Errorf("scan legacy row: %w", err)
+		if uploads%(legacyBatch*50) < legacyBatch {
+			log.Printf("[migrate] legacy data: %d uploads, %d files", uploads, files)
+			checkpoint(ctx, db, driver)
 		}
-		if r.SubsceneID == "" {
-			// Without a Subscene id there is no upload to attach the file to.
-			orphaned++
-			continue
-		}
-		batch = append(batch, r)
-		if len(batch) >= legacyBatch {
-			if err := flush(); err != nil {
-				return err
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := flush(); err != nil {
-		return err
 	}
 
 	if uploads > 0 || orphaned > 0 {
@@ -137,6 +121,56 @@ func migrateLegacyRows(ctx context.Context, db *sql.DB, driver string) error {
 			uploads, files, orphaned)
 	}
 	return nil
+}
+
+// readLegacyPage reads one page of the flat table, ordered by its primary key.
+//
+// Paging rather than streaming one long query is what keeps this migration from
+// needing as much free disk as the database itself: an open read holds a
+// snapshot, and while it is held SQLite cannot check its write-ahead log back
+// into the database file, so the log grows by every row the migration writes.
+func readLegacyPage(ctx context.Context, db *sql.DB, driver, selectList, after string) ([]legacyRow, error) {
+	query := fmt.Sprintf("SELECT %s FROM subtitles WHERE id > %s ORDER BY id LIMIT %d",
+		selectList, placeholders(driver, 1), legacyBatch)
+
+	rows, err := db.QueryContext(ctx, query, after)
+	if err != nil {
+		return nil, fmt.Errorf("read legacy subtitles: %w", err)
+	}
+	defer rows.Close()
+
+	page := make([]legacyRow, 0, legacyBatch)
+	for rows.Next() {
+		var r legacyRow
+		if err := rows.Scan(&r.ID, &r.SubsceneID, &r.Title, &r.Slug, &r.ImdbID, &r.Language,
+			&r.HI, &r.Author, &r.Releases, &r.Comment, &r.Year, &r.Filename, &r.Format,
+			&r.ContentKey, &r.ContentHash, &r.UploadedAt, &r.Downloads); err != nil {
+			return nil, fmt.Errorf("scan legacy row: %w", err)
+		}
+		page = append(page, r)
+	}
+	return page, rows.Err()
+}
+
+// checkpoint folds SQLite's write-ahead log back into the database file.
+//
+// SQLite checkpoints on its own, but only opportunistically and never while
+// another connection is reading. Copying five million rows with random primary
+// keys, reading between every batch, defeats that: the log grew to eighteen
+// gigabytes on the reference database before this was added — more free disk
+// than the database itself needs.
+func checkpoint(ctx context.Context, db *sql.DB, driver string) {
+	if driver != "sqlite" {
+		return
+	}
+	var busy, size, checkpointed int
+	if err := db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &size, &checkpointed); err != nil {
+		log.Printf("[migrate] checkpoint failed: %v", err)
+		return
+	}
+	if busy != 0 {
+		log.Printf("[migrate] checkpoint blocked by a reader, %d pages still in the log", size)
+	}
 }
 
 // legacyColumns is what the migration reads, in scan order, with the fallback to

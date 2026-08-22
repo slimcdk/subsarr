@@ -544,17 +544,26 @@ func (s *sqlStore) writeNotKept(b *builder, keep []string) {
 	b.write(")")
 }
 
-// Reindex rebuilds the title index from the catalogue. It is derived data, so
-// this is safe to run at any time; the importer runs it once at the end rather
-// than maintaining the index row by row.
-func (s *sqlStore) Reindex(ctx context.Context) error {
-	return s.d.reindexTitles(ctx, s.db)
+// Checkpoint bounds whatever the database writes ahead of its data file. A bulk
+// writer calls it periodically; on the dialects that manage their own log it does
+// nothing.
+func (s *sqlStore) Checkpoint(ctx context.Context) error {
+	return s.d.checkpoint(ctx, s.db)
 }
 
-// Optimize brings derived data up to date without doing the work when it is
-// already current: the title index is rebuilt only if it is empty while the
-// catalogue is not, and statistics are refreshed so the planner picks the
-// composite indexes.
+// Reindex rebuilds the title index from the catalogue and refreshes the planner
+// statistics. It is derived data, so this is safe to run at any time; the
+// importer runs it once at the end rather than maintaining the index row by row.
+func (s *sqlStore) Reindex(ctx context.Context) error {
+	if err := s.d.reindexTitles(ctx, s.db); err != nil {
+		return err
+	}
+	return s.d.analyze(ctx, s.db)
+}
+
+// Optimize is the check every start runs: it makes sure the derived data a
+// search depends on exists, and does nothing when it already does. Rebuilding
+// unconditionally would add a minute to every restart of a full installation.
 func (s *sqlStore) Optimize(ctx context.Context) error {
 	indexed, err := s.d.titleIndexSize(ctx, s.db)
 	if err != nil {
@@ -566,10 +575,18 @@ func (s *sqlStore) Optimize(ctx context.Context) error {
 			return err
 		}
 		if uploads > 0 {
+			// The index is missing on a database that has data: it was never
+			// built, or an import was interrupted before it could be.
 			if err := s.Reindex(ctx); err != nil {
 				return fmt.Errorf("rebuild title index: %w", err)
 			}
+			return nil
 		}
+	}
+
+	needed, err := s.d.needsAnalyze(ctx, s.db)
+	if err != nil || !needed {
+		return err
 	}
 	return s.d.analyze(ctx, s.db)
 }

@@ -210,6 +210,27 @@ func TestConformance_SearchByTitleFallsBackToSubstring(t *testing.T) {
 	})
 }
 
+// A fragment inside a word is what the substring path exists for: no word match
+// can find it, and Subscene spelled plenty of titles as one word.
+func TestConformance_SearchByTitleFindsAFragment(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st Store) {
+		seed(t, st,
+			[]Upload{upload("302", "spiderman-homecoming", "Spiderman Homecoming", "tt2250912", "english")},
+			[]IngestFile{file("f302", "302", "Spiderman.srt", hash(11))},
+		)
+
+		subs, total, err := st.SearchSubtitles(context.Background(), SearchParams{
+			Query: "iderman", Language: "english", Limit: 50,
+		})
+		if err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if total != 1 || len(subs) != 1 || subs[0].ID != "f302" {
+			t.Errorf("got %v (total %d), want [f302]", ids(subs), total)
+		}
+	})
+}
+
 func TestConformance_SearchMissReturnsEmptyPage(t *testing.T) {
 	storetest.Each(t, func(t *testing.T, st Store) {
 		darkKnight(t, st)

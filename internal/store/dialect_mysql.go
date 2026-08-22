@@ -121,3 +121,10 @@ func (mysqlDialect) analyze(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+// needsAnalyze is always false: InnoDB samples index statistics on its own, and
+// an import refreshes them explicitly when it finishes.
+func (mysqlDialect) needsAnalyze(context.Context, *sql.DB) (bool, error) { return false, nil }
+
+// checkpoint is a no-op: InnoDB manages its own redo log.
+func (mysqlDialect) checkpoint(context.Context, *sql.DB) error { return nil }

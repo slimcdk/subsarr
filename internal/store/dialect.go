@@ -58,6 +58,13 @@ type dialect interface {
 
 	// analyze refreshes planner statistics.
 	analyze(ctx context.Context, db *sql.DB) error
+
+	// needsAnalyze reports whether statistics are missing altogether. It is what
+	// keeps a restart from re-analysing millions of rows that have not changed.
+	needsAnalyze(ctx context.Context, db *sql.DB) (bool, error)
+
+	// checkpoint bounds whatever the dialect writes ahead of its data file.
+	checkpoint(ctx context.Context, db *sql.DB) error
 }
 
 // builder assembles one statement together with its arguments, so that a

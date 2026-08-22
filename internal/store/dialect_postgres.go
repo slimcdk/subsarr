@@ -82,3 +82,10 @@ func (postgresDialect) analyze(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+// needsAnalyze is always false: autovacuum keeps PostgreSQL's statistics current
+// on its own, and an import refreshes them explicitly when it finishes.
+func (postgresDialect) needsAnalyze(context.Context, *sql.DB) (bool, error) { return false, nil }
+
+// checkpoint is a no-op: PostgreSQL manages its own write-ahead log.
+func (postgresDialect) checkpoint(context.Context, *sql.DB) error { return nil }
