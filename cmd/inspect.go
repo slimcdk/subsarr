@@ -15,21 +15,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// sampleSize is how many entries `inspect-archive` opens to see what they hold.
-// Reading them all would be an import; reading a few hundred is enough to know
-// what a dump is made of.
-const sampleSize = 300
-
 func inspectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inspect-archive",
 		Short: "Summarise a dump without importing it",
-		Long: `Report what a dump contains: how its catalogue was read, how much of it
-carries an IMDB id, which languages it holds, what its entries are, and which file
-names could not be parsed.
+		Long: `Report what a dump contains: what its entries are, which file names
+could not be parsed, whether it carries a catalogue and how that catalogue's
+columns were read.
 
 Nothing is extracted and nothing is written. Run this before an import to check
 that your copy of the dump is read the way you expect.
+
+Every entry's name is listed — that is free, it comes from the archive's header —
+so the counts and the answer about the catalogue cover the whole dump. Opening an
+entry is what costs: --sample bounds how many are opened to see what they hold,
+and reading the catalogue decompresses everything before it in the archive, which
+--skip-catalogue avoids.
 
   subsarr inspect-archive --archive "/mnt/dump/Subscene V2.7z.001"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -37,7 +38,8 @@ that your copy of the dump is read the way you expect.
 			if err != nil {
 				return err
 			}
-			limit, _ := cmd.Flags().GetInt("limit")
+			sample, _ := cmd.Flags().GetInt("sample")
+			skipCatalogue, _ := cmd.Flags().GetBool("skip-catalogue")
 			out := cmd.OutOrStdout()
 
 			source, err := d.open()
@@ -46,16 +48,41 @@ that your copy of the dump is read the way you expect.
 			}
 			defer func() { _ = source.Close() }()
 
-			report := newArchiveReport(limit)
-			if d.catalogue != "" {
-				if err := report.readCatalogueFile(d.catalogue); err != nil {
-					return err
-				}
-			}
+			report := newArchiveReport(sample)
 			if err := report.walk(source); err != nil {
 				return err
 			}
-			report.print(out)
+
+			// The entry summary first: it is the fast half, and on a dump whose
+			// catalogue sits at the end it is all an operator gets for a while.
+			report.printEntries(out)
+
+			switch {
+			case d.catalogue != "":
+				if err := report.readCatalogueFile(d.catalogue); err != nil {
+					return err
+				}
+			case report.catalogueEntry == nil:
+				fmt.Fprintf(out, "\nCatalogue      none in this dump — an import would have to fall back to file names\n")
+				return nil
+			case skipCatalogue:
+				fmt.Fprintf(out, "\nCatalogue      %s (entry %d of %d) — not read, --skip-catalogue was given\n",
+					report.catalogueEntry.Name(), report.cataloguePosition, report.entries)
+				return nil
+			default:
+				fmt.Fprintf(out, "\nReading the catalogue: %s, entry %d of %d …\n",
+					report.catalogueEntry.Name(), report.cataloguePosition, report.entries)
+				if report.cataloguePosition > report.entries/2 {
+					fmt.Fprintf(out, "  It sits late in a solid archive, so this decompresses everything\n"+
+						"  before it. Extract it once and pass --catalogue to skip that, here and\n"+
+						"  on the import.\n")
+				}
+				if err := report.readCatalogue(report.catalogueEntry); err != nil {
+					return err
+				}
+			}
+
+			report.printCatalogue(out)
 			return nil
 		},
 	}
@@ -65,13 +92,14 @@ that your copy of the dump is read the way you expect.
 	cmd.Flags().String("catalogue", "", "Read the catalogue from this file instead of from the dump")
 	cmd.Flags().String("metadata", "", "V1 dump: path to metadata.json")
 	cmd.Flags().String("subtitles", "", "V1 dump: path to the subtitles/ directory")
-	cmd.Flags().Int("limit", 0, "Stop after this many entries (0 = all)")
+	cmd.Flags().Int("sample", 300, "Entries to open to see what they hold (0 = none); every entry's name is listed regardless")
+	cmd.Flags().Bool("skip-catalogue", false, "Do not read the catalogue, only report whether the dump has one")
 
 	return cmd
 }
 
 type archiveReport struct {
-	limit int
+	sample int
 
 	entries       int
 	bytes         int64
@@ -83,15 +111,20 @@ type archiveReport struct {
 	catalogue     *catalogue.Result
 	catalogueName string
 
+	// The catalogue is found by name while scanning and read afterwards, so that
+	// the cheap half of the report can be printed first.
+	catalogueEntry    archive.Entry
+	cataloguePosition int
+
 	languages  map[string]int
 	withIMDB   int
 	rowsWithID int
 	sampleRows []catalogue.Upload
 }
 
-func newArchiveReport(limit int) *archiveReport {
+func newArchiveReport(sample int) *archiveReport {
 	return &archiveReport{
-		limit:        limit,
+		sample:       sample,
 		extensions:   map[string]int{},
 		sampledKinds: map[string]int{},
 		languages:    map[string]int{},
@@ -100,9 +133,6 @@ func newArchiveReport(limit int) *archiveReport {
 
 func (r *archiveReport) walk(source archive.Source) error {
 	return source.Each(func(e archive.Entry) error {
-		if r.limit > 0 && r.entries >= r.limit {
-			return archive.ErrStop
-		}
 		r.entries++
 		r.bytes += e.Size()
 
@@ -114,11 +144,11 @@ func (r *archiveReport) walk(source archive.Source) error {
 		r.extensions[ext]++
 
 		if isCatalogue(name) {
-			if r.catalogue != nil {
-				// Already read from a file the operator pointed at.
-				return nil
+			if r.catalogueEntry == nil {
+				r.catalogueEntry = e
+				r.cataloguePosition = r.entries
 			}
-			return r.readCatalogue(e)
+			return nil
 		}
 
 		if catalogue.SubsceneIDFromPath(name) == "" {
@@ -130,7 +160,7 @@ func (r *archiveReport) walk(source archive.Source) error {
 
 		// Only the first entries are opened: what a dump is made of shows up long
 		// before the end of it, and opening every entry would be an import.
-		if r.sampled < sampleSize {
+		if r.sampled < r.sample {
 			r.sampled++
 			r.sampleKind(e)
 		}
@@ -193,7 +223,9 @@ func (r *archiveReport) sampleKind(e archive.Entry) {
 	}
 	defer rc.Close()
 
-	data, err := io.ReadAll(io.LimitReader(rc, subfile.MaxFileSize+1))
+	// The same bound the importer reads an entry with, or this would report a
+	// season pack as truncated and an import would store it.
+	data, err := io.ReadAll(io.LimitReader(rc, subfile.MaxEntrySize+1))
 	if err != nil {
 		r.sampledKinds["unreadable"]++
 		return
@@ -206,7 +238,7 @@ func (r *archiveReport) sampleKind(e archive.Entry) {
 	r.sampledKinds[fmt.Sprintf("%d subtitle(s)", len(files))]++
 }
 
-func (r *archiveReport) print(w io.Writer) {
+func (r *archiveReport) printEntries(w io.Writer) {
 	fmt.Fprintf(w, "Entries        %d (%s)\n", r.entries, humanBytes(r.bytes))
 
 	fmt.Fprintf(w, "\nEntries by extension\n")
@@ -214,48 +246,10 @@ func (r *archiveReport) print(w io.Writer) {
 		fmt.Fprintf(w, "  %-10s %8d\n", kv.key, kv.count)
 	}
 
-	fmt.Fprintf(w, "\nContents of the first %d entries\n", r.sampled)
-	for _, kv := range sortedCounts(r.sampledKinds) {
-		fmt.Fprintf(w, "  %-16s %6d\n", kv.key, kv.count)
-	}
-
-	if r.catalogue == nil {
-		fmt.Fprintf(w, "\nCatalogue      none found — an import would have to fall back to file names\n")
-	} else {
-		fmt.Fprintf(w, "\nCatalogue      %s (table %q, %d rows, %d unreadable)\n",
-			r.catalogueName, r.catalogue.Table, r.catalogue.Rows, r.catalogue.Skipped)
-		fmt.Fprintf(w, "  columns      %s\n", strings.Join(r.catalogue.Columns, ", "))
-		fmt.Fprintf(w, "  read as\n")
-		for _, role := range catalogue.Roles() {
-			column, ok := r.catalogue.Mapping[role]
-			if !ok {
-				column = "— not found —"
-			}
-			fmt.Fprintf(w, "    %-12s %s\n", role, column)
-		}
-
-		fmt.Fprintf(w, "  coverage     %s carry an IMDB id, %s carry an upload id\n",
-			percent(r.withIMDB, r.catalogue.Rows), percent(r.rowsWithID, r.catalogue.Rows))
-		fmt.Fprintf(w, "  entries      %s of the archive's entries have a catalogue row\n",
-			percent(r.catalogue.Rows, r.entries))
-
-		fmt.Fprintf(w, "\nLanguages (%d)\n", len(r.languages))
-		for i, kv := range sortedCounts(r.languages) {
-			if i >= 25 {
-				fmt.Fprintf(w, "  … and %d more\n", len(r.languages)-25)
-				break
-			}
-			name := kv.key
-			if name == "" {
-				name = "(unknown)"
-			}
-			fmt.Fprintf(w, "  %-24s %8d\n", name, kv.count)
-		}
-
-		fmt.Fprintf(w, "\nSample rows\n")
-		for _, row := range r.sampleRows {
-			fmt.Fprintf(w, "  %s  %q  %s  %s  %v\n  %s\n",
-				row.SubsceneID, row.Title, row.ImdbID, row.Language, row.Releases, row.FilePath)
+	if r.sampled > 0 {
+		fmt.Fprintf(w, "\nContents of the first %d entries\n", r.sampled)
+		for _, kv := range sortedCounts(r.sampledKinds) {
+			fmt.Fprintf(w, "  %-16s %6d\n", kv.key, kv.count)
 		}
 	}
 
@@ -264,6 +258,48 @@ func (r *archiveReport) print(w io.Writer) {
 		for _, name := range r.unparseable {
 			fmt.Fprintf(w, "  %s\n", name)
 		}
+	}
+}
+
+func (r *archiveReport) printCatalogue(w io.Writer) {
+	if r.catalogue == nil {
+		return
+	}
+
+	fmt.Fprintf(w, "\nCatalogue      %s (table %q, %d rows, %d unreadable)\n",
+		r.catalogueName, r.catalogue.Table, r.catalogue.Rows, r.catalogue.Skipped)
+	fmt.Fprintf(w, "  columns      %s\n", strings.Join(r.catalogue.Columns, ", "))
+	fmt.Fprintf(w, "  read as\n")
+	for _, role := range catalogue.Roles() {
+		column, ok := r.catalogue.Mapping[role]
+		if !ok {
+			column = "— not found —"
+		}
+		fmt.Fprintf(w, "    %-12s %s\n", role, column)
+	}
+
+	fmt.Fprintf(w, "  coverage     %s carry an IMDB id, %s carry an upload id\n",
+		percent(r.withIMDB, r.catalogue.Rows), percent(r.rowsWithID, r.catalogue.Rows))
+	fmt.Fprintf(w, "  entries      %s of the archive's entries have a catalogue row\n",
+		percent(r.catalogue.Rows, r.entries))
+
+	fmt.Fprintf(w, "\nLanguages (%d)\n", len(r.languages))
+	for i, kv := range sortedCounts(r.languages) {
+		if i >= 25 {
+			fmt.Fprintf(w, "  … and %d more\n", len(r.languages)-25)
+			break
+		}
+		name := kv.key
+		if name == "" {
+			name = "(unknown)"
+		}
+		fmt.Fprintf(w, "  %-24s %8d\n", name, kv.count)
+	}
+
+	fmt.Fprintf(w, "\nSample rows\n")
+	for _, row := range r.sampleRows {
+		fmt.Fprintf(w, "  %s  %q  %s  %s  %v\n  %s\n",
+			row.SubsceneID, row.Title, row.ImdbID, row.Language, row.Releases, row.FilePath)
 	}
 }
 

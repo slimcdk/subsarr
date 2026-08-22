@@ -245,9 +245,20 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d d
 
 	log.Print("[import] pass 1/2: loading the catalogue …")
 	found := false
+	scanned := 0
 	err = source.Each(func(e archive.Entry) error {
+		scanned++
 		if !isCatalogue(e.Name()) {
 			return nil
+		}
+
+		// Entry names are free — they come from the archive's header — but
+		// opening one is not: in a solid archive everything before it has to be
+		// decompressed, and pass 2 then starts again from the front.
+		if scanned > lateCatalogue {
+			log.Printf("[import] the catalogue is entry %d of the archive; reading it decompresses "+
+				"everything before it, and pass 2 will read the archive again from the start. "+
+				"Extracting it once and passing --catalogue avoids that.", scanned)
 		}
 		rc, err := e.Open()
 		if err != nil {
@@ -272,6 +283,10 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d d
 	}
 	return nil
 }
+
+// lateCatalogue is how far into an archive the catalogue has to be before it is
+// worth telling an operator that extracting it separately would be quicker.
+const lateCatalogue = 100_000
 
 // isCatalogue recognises a dump's catalogue: the V2 archive ships a SQL dump,
 // the V1 one a metadata.json. The SQL file's name differs between mirrors, so
