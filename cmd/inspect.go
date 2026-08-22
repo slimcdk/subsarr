@@ -43,7 +43,7 @@ that your copy of the dump is read the way you expect.
 			if err != nil {
 				return err
 			}
-			defer source.Close()
+			defer func() { _ = source.Close() }()
 
 			report := newArchiveReport(limit)
 			if err := report.walk(source); err != nil {

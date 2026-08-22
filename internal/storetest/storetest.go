@@ -107,7 +107,7 @@ func postgresTestDSN(t *testing.T, dsn string) string {
 			return
 		}
 		defer db.Close()
-		db.Exec("DROP SCHEMA " + schema + " CASCADE")
+		_, _ = db.Exec("DROP SCHEMA " + schema + " CASCADE")
 	})
 
 	sep := "?"
@@ -138,7 +138,7 @@ func mysqlTestDSN(t *testing.T, dsn string) string {
 			return
 		}
 		defer db.Close()
-		db.Exec("DROP DATABASE " + name)
+		_, _ = db.Exec("DROP DATABASE " + name)
 	})
 
 	base, params, _ := strings.Cut(dsn, "?")

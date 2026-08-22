@@ -13,5 +13,5 @@ var openAPISpec []byte
 // operator reads is the documentation of the build they are running.
 func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
-	w.Write(openAPISpec)
+	_, _ = w.Write(openAPISpec)
 }

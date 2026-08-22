@@ -24,9 +24,11 @@ func Root(cfg config.Config) *cobra.Command {
 		Use:     "subsarr",
 		Short:   "Self-hosted Subscene subtitle provider",
 		Version: version.String(),
-		// A failing command has already said what went wrong; cobra printing the
-		// usage screen on top of it only buries the message.
-		SilenceUsage: true,
+		// A failing command has already said what went wrong. Cobra printing the
+		// usage screen on top of it buries the message, and main already reports
+		// the error itself.
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 	root.AddCommand(
 		serveCommand(cfg),
@@ -34,6 +36,7 @@ func Root(cfg config.Config) *cobra.Command {
 		importCommand(cfg),
 		inspectCommand(),
 		pruneCommand(cfg),
+		evaluateCommand(cfg),
 	)
 	return root
 }

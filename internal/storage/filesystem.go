@@ -32,7 +32,7 @@ func (fsys *Filesystem) Put(_ context.Context, key string, r io.Reader, _ int64)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if _, err := io.Copy(tmp, r); err != nil {
 		tmp.Close()

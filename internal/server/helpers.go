@@ -12,10 +12,12 @@ import (
 // request for more than the service will give, not a malformed one.
 const maxPerPage = 200
 
+// writeJSON writes a response. Once the status line is out there is nothing a
+// caller could do about a failed write, so the error is deliberately dropped.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func badRequest(w http.ResponseWriter, err error) {

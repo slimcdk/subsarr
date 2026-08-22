@@ -1,10 +1,6 @@
 package database
 
-import (
-	"time"
-
-	"github.com/pressly/goose/v3/lock"
-)
+import "github.com/pressly/goose/v3/lock"
 
 // newPostgresLocker returns the advisory lock goose takes for the duration of a
 // migration run. It holds the lock on its own connection, so a second container
@@ -16,6 +12,3 @@ func newPostgresLocker() (lock.SessionLocker, error) {
 		lock.WithUnlockTimeout(10, 30), // give up releasing after 5 minutes
 	)
 }
-
-// migrationTimeout bounds a single migration command run from the CLI.
-const migrationTimeout = 24 * time.Hour

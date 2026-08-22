@@ -1,18 +1,17 @@
 {
   "name": "subsarr",
-  "image": "mcr.microsoft.com/devcontainers/go:2-1.26-bookworm",
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "mounts": [
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached"
   ],
-  "postCreateCommand": "go mod download",
+  "postCreateCommand": "go mod download && go build ./...",
   "forwardPorts": [
     8090
   ],
   "portsAttributes": {
     "8090": {
-      "label": "PocketBase",
+      "label": "subsarr",
       "onAutoForward": "notify"
     }
   },
@@ -49,8 +48,11 @@
           }
         },
         "files.watcherExclude": {
-          "**/pb_data/**": true
-        }
+          "**/data/**": true,
+          "**/storage/**": true
+        },
+        "go.buildTags": "sqlite_fts5 sqlite_stat4",
+        "go.testTags": "sqlite_fts5 sqlite_stat4"
       }
     }
   },
@@ -60,5 +62,9 @@
     "ghcr.io/devcontainers-extra/features/apt-packages:1": {},
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
   }
 }

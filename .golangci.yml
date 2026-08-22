@@ -1,0 +1,44 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - unconvert
+
+  settings:
+    errcheck:
+      # Closing a reader we are done with, or writing a report to stdout, has no
+      # failure a caller could act on. Everything else is checked.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - (*bufio.Reader).ReadByte
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*github.com/slimcdk/subsarr/internal/archive.Source).Close
+
+  exclusions:
+    rules:
+      # A test that ignores an error on purpose is making a point about what it
+      # is testing, not hiding a bug.
+      - path: _test\.go
+        linters: [errcheck]
+
+      # Subscene's own spellings are data, not prose: `ukranian` and
+      # `northen-sami` are the names Bazarr sends, and correcting them here would
+      # make those languages unreachable.
+      - path: internal/lang/
+        linters: [misspell]

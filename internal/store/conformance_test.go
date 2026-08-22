@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -339,7 +340,7 @@ func TestConformance_GetSubtitle(t *testing.T) {
 			t.Errorf("got %+v, want the upload's metadata joined onto the file", sub)
 		}
 
-		if _, err := st.GetSubtitle(ctx, "nope"); err != sql.ErrNoRows {
+		if _, err := st.GetSubtitle(ctx, "nope"); !errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("GetSubtitle of an unknown id returned %v, want sql.ErrNoRows", err)
 		}
 	})

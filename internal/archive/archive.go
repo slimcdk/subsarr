@@ -7,6 +7,7 @@
 package archive
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -34,11 +35,7 @@ type Source interface {
 }
 
 // ErrStop ends iteration without failing it.
-var ErrStop = stopError{}
-
-type stopError struct{}
-
-func (stopError) Error() string { return "stop iteration" }
+var ErrStop = errors.New("stop iteration")
 
 // ─── 7z ──────────────────────────────────────────────────────────────────────
 
@@ -65,7 +62,7 @@ func (s *sevenZipSource) Each(fn func(Entry) error) error {
 			continue
 		}
 		if err := fn(sevenZipEntry{f}); err != nil {
-			if err == ErrStop {
+			if errors.Is(err, ErrStop) {
 				return nil
 			}
 			return err
@@ -78,8 +75,8 @@ func (s *sevenZipSource) Close() error { return s.reader.Close() }
 
 type sevenZipEntry struct{ f *sevenzip.File }
 
-func (e sevenZipEntry) Name() string  { return normalisePath(e.f.Name) }
-func (e sevenZipEntry) Size() int64   { return int64(e.f.UncompressedSize) }
+func (e sevenZipEntry) Name() string { return normalisePath(e.f.Name) }
+func (e sevenZipEntry) Size() int64  { return int64(e.f.UncompressedSize) }
 func (e sevenZipEntry) Open() (io.ReadCloser, error) {
 	return e.f.Open()
 }
@@ -111,7 +108,7 @@ func (s *dirSource) Each(fn func(Entry) error) error {
 			return err
 		}
 		if err := fn(dirEntry{path: path, name: normalisePath(rel), size: info.Size()}); err != nil {
-			if err == ErrStop {
+			if errors.Is(err, ErrStop) {
 				return fs.SkipAll
 			}
 			return err
@@ -155,7 +152,7 @@ type MemorySource []MemoryEntry
 func (s MemorySource) Each(fn func(Entry) error) error {
 	for _, e := range s {
 		if err := fn(e); err != nil {
-			if err == ErrStop {
+			if errors.Is(err, ErrStop) {
 				return nil
 			}
 			return err

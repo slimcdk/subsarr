@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// The counter is part of the ranking, so it must not be lost when the client
 	// disconnects the moment it has the bytes. WithoutCancel keeps the request's
 	// values while dropping its deadline.
-	go s.store.IncrementDownloads(context.WithoutCancel(r.Context()), id)
+	go func() {
+		if err := s.store.IncrementDownloads(context.WithoutCancel(r.Context()), id); err != nil {
+			log.Printf("download counter for %s: %v", id, err)
+		}
+	}()
 
 	filename := record.Filename
 	if filename == "" {
@@ -51,7 +56,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitiseFilename(filename)+`"`)
 	w.Header().Set("Content-Type", "application/octet-stream")
-	io.Copy(w, rc)
+	// A copy that fails here is a client that hung up; the file is fine.
+	_, _ = io.Copy(w, rc)
 }
 
 // sanitiseFilename keeps a subtitle's own name from breaking the header it is

@@ -9,6 +9,7 @@ package catalogue
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -43,7 +44,7 @@ const (
 func (r *reader) scan(onColumns func(table string, columns []string) error, onTuple func([]string) error) error {
 	for {
 		head, delim, err := r.readHead()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
@@ -369,7 +370,7 @@ func unescape(c byte) byte {
 }
 
 func ignoreEOF(err error) error {
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		return nil
 	}
 	return err

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -85,7 +86,7 @@ func (s *sqlStore) ListLanguages(ctx context.Context) ([]LanguageCount, error) {
 func (s *sqlStore) HasIMDBIDs(ctx context.Context) (bool, error) {
 	var one int
 	err := s.db.QueryRowContext(ctx, "SELECT 1 FROM uploads WHERE imdb_id <> '' LIMIT 1").Scan(&one)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	return err == nil, err
@@ -514,11 +515,11 @@ func (s *sqlStore) PruneLanguages(ctx context.Context, keep []string, batch int)
 		q := newBuilder(s.d)
 		q.write("SELECT 1 FROM files WHERE content_key = " + q.bind(key) + " LIMIT 1")
 		var one int
-		switch err := s.db.QueryRowContext(ctx, q.String(), q.args...).Scan(&one); err {
-		case sql.ErrNoRows:
+		err := s.db.QueryRowContext(ctx, q.String(), q.args...).Scan(&one)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
 			result.OrphanKeys = append(result.OrphanKeys, key)
-		case nil:
-		default:
+		case err != nil:
 			return result, err
 		}
 	}
