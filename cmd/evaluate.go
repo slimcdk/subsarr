@@ -42,6 +42,7 @@ Nothing is written. Run it on a copy of a real database:
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			count, _ := cmd.Flags().GetInt("queries")
+			compare, _ := cmd.Flags().GetInt("compare")
 			out := cmd.OutOrStdout()
 
 			s, err := open(ctx, cfg, false)
@@ -50,12 +51,13 @@ Nothing is written. Run it on a copy of a real database:
 			}
 			defer s.Close()
 
-			ev := &evaluator{store: s.store, db: s.db, driver: cfg.DBDriver, out: out}
+			ev := &evaluator{store: s.store, db: s.db, driver: cfg.DBDriver, out: out, compare: compare}
 			return ev.run(ctx, count)
 		},
 	}
 
 	cmd.Flags().Int("queries", 2000, "Queries to replay per shape")
+	cmd.Flags().Int("compare", 100, "Queries per shape to also run through the substring scan the title index replaced")
 	return cmd
 }
 
@@ -64,6 +66,11 @@ type evaluator struct {
 	db     *sql.DB
 	driver string
 	out    io.Writer
+	// compare caps how many queries per shape are also run through the old
+	// substring scan. That scan reads every row of the requested language, which
+	// is the point of the comparison and the reason it cannot be run on all of
+	// them.
+	compare int
 }
 
 // sample is one query taken from the data, together with what it was taken from.
@@ -85,6 +92,7 @@ type shapeResult struct {
 	misses     int // those that did not return it
 	recallLost int // results the old substring path found and this one did not
 	comparable int
+	baseline   []time.Duration // how long that scan took
 }
 
 func (e *evaluator) run(ctx context.Context, count int) error {
@@ -146,7 +154,9 @@ func (e *evaluator) run(ctx context.Context, count int) error {
 			float64(r.checked-r.misses)/float64(r.checked), r.misses, r.checked)
 		if r.comparable > 0 {
 			recall := float64(r.comparable-r.recallLost) / float64(r.comparable)
+			p50, p95, _ := percentiles(r.baseline)
 			fmt.Fprintf(e.out, "  recall vs substring     %.4f over %d compared queries\n", recall, r.comparable)
+			fmt.Fprintf(e.out, "  the scan it replaced    p50 %s, p95 %s\n", p50, p95)
 		}
 	}
 	return nil
@@ -192,15 +202,17 @@ func (e *evaluator) replay(ctx context.Context, name string, samples []sample, b
 			result.misses++
 		}
 
-		if params.Query == "" {
+		if params.Query == "" || result.comparable >= e.compare {
 			continue
 		}
 
 		// And the index must not find less than the scan it replaced.
+		baselineStarted := time.Now()
 		baseline, err := e.substringSearch(ctx, params)
 		if err != nil {
 			continue
 		}
+		result.baseline = append(result.baseline, time.Since(baselineStarted))
 		result.comparable++
 		got := make(map[string]struct{}, len(subs))
 		for _, sub := range subs {
@@ -216,21 +228,27 @@ func (e *evaluator) replay(ctx context.Context, name string, samples []sample, b
 	return result
 }
 
+// argBinder numbers bind parameters for whichever dialect this database is.
+type argBinder struct {
+	driver string
+	args   []any
+}
+
+func (b *argBinder) bind(v any) string {
+	b.args = append(b.args, v)
+	if b.driver == "postgres" {
+		return "$" + strconv.Itoa(len(b.args))
+	}
+	return "?"
+}
+
 // substringSearch is the search this service used to do: a scan of every upload
 // in the language, matching the query as a substring of the title or the file
 // name. It is the baseline the title index is measured against.
 func (e *evaluator) substringSearch(ctx context.Context, p store.SearchParams) ([]string, error) {
-	var (
-		conds []string
-		args  []any
-	)
-	bind := func(v any) string {
-		args = append(args, v)
-		if e.driver == "postgres" {
-			return "$" + strconv.Itoa(len(args))
-		}
-		return "?"
-	}
+	var conds []string
+	b := &argBinder{driver: e.driver}
+	bind := b.bind
 	like := "LIKE"
 	if e.driver == "postgres" {
 		like = "ILIKE"
@@ -245,7 +263,7 @@ func (e *evaluator) substringSearch(ctx context.Context, p store.SearchParams) (
 	query := "SELECT f.id FROM files f JOIN uploads u ON u.id = f.upload_id WHERE " +
 		strings.Join(conds, " AND ") + " ORDER BY f.downloads DESC LIMIT " + bind(bazarrPerPage)
 
-	rows, err := e.db.QueryContext(ctx, query, args...)
+	rows, err := e.db.QueryContext(ctx, query, b.args...)
 	if err != nil {
 		return nil, err
 	}
@@ -262,37 +280,20 @@ func (e *evaluator) substringSearch(ctx context.Context, p store.SearchParams) (
 	return ids, rows.Err()
 }
 
-// sampleFilms takes queries from uploads that carry an IMDB id, spread across the
-// table rather than taken from its start.
+// sampleFilms takes queries from the title index: one upload per distinct work,
+// spread across the catalogue.
+//
+// Sampling from `titles` rather than from `uploads` is what keeps this cheap: the
+// index holds one row per work and is read a page at a time, where grouping the
+// whole upload table would be minutes of work before a single query is replayed.
 func (e *evaluator) sampleFilms(ctx context.Context, count int) ([]sample, error) {
-	const withIMDB = `SELECT u.imdb_id, u.title, u.slug, u.language
-		FROM uploads u JOIN files f ON f.upload_id = u.id
-		WHERE u.imdb_id <> '' AND u.title <> ''
-		GROUP BY u.imdb_id, u.title, u.slug, u.language`
-
-	samples, err := e.sampleQuery(ctx, withIMDB, count)
-	if err != nil || len(samples) > 0 {
-		return samples, err
-	}
-
-	// An installation that has been migrated but not yet re-imported has no
-	// IMDB ids at all. The title shapes are still worth measuring.
-	const anyUpload = `SELECT u.imdb_id, u.title, u.slug, u.language
-		FROM uploads u JOIN files f ON f.upload_id = u.id
-		WHERE u.title <> ''
-		GROUP BY u.imdb_id, u.title, u.slug, u.language`
-	return e.sampleQuery(ctx, anyUpload, count)
+	return e.sampleQuery(ctx, count, "")
 }
 
-// sampleEpisodes takes queries from uploads whose release names look like an
+// sampleEpisodes takes queries from works whose release names look like an
 // episode, which is how Bazarr's TV searches are shaped.
 func (e *evaluator) sampleEpisodes(ctx context.Context, count int) ([]sample, error) {
-	const query = `SELECT u.imdb_id, u.title, u.slug, u.language
-		FROM uploads u JOIN files f ON f.upload_id = u.id
-		WHERE u.imdb_id <> '' AND u.releases LIKE '%S0%E0%'
-		GROUP BY u.imdb_id, u.title, u.slug, u.language`
-
-	samples, err := e.sampleQuery(ctx, query, count)
+	samples, err := e.sampleQuery(ctx, count, "AND u.releases LIKE '%S0%E0%'")
 	if err != nil {
 		return nil, err
 	}
@@ -304,29 +305,49 @@ func (e *evaluator) sampleEpisodes(ctx context.Context, count int) ([]sample, er
 	return samples, nil
 }
 
-func (e *evaluator) sampleQuery(ctx context.Context, query string, count int) ([]sample, error) {
-	rows, err := e.db.QueryContext(ctx, query+" LIMIT "+strconv.Itoa(count*7))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// sampleQuery walks the title index in pages, taking one upload per work and
+// keeping every seventh one so the sample is not one corner of the catalogue.
+func (e *evaluator) sampleQuery(ctx context.Context, count int, extra string) ([]sample, error) {
+	const page = 500
 
-	var all []sample
-	for rows.Next() {
-		var s sample
-		if err := rows.Scan(&s.imdb, &s.title, &s.slug, &s.language); err != nil {
+	out := make([]sample, 0, count)
+	last := ""
+	seen := 0
+
+	for len(out) < count {
+		b := &argBinder{driver: e.driver}
+		query := "SELECT t.slug, MIN(t.title), MIN(u.imdb_id), MIN(u.language)" +
+			" FROM titles t JOIN uploads u ON u.slug = t.slug" +
+			" JOIN files f ON f.upload_id = u.id" +
+			" WHERE t.slug > " + b.bind(last) + " " + extra +
+			" GROUP BY t.slug ORDER BY t.slug LIMIT " + b.bind(page)
+
+		rows, err := e.db.QueryContext(ctx, query, b.args...)
+		if err != nil {
+			return nil, fmt.Errorf("sample: %w", err)
+		}
+
+		found := 0
+		for rows.Next() {
+			var s sample
+			if err := rows.Scan(&s.slug, &s.title, &s.imdb, &s.language); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			found++
+			last = s.slug
+			if seen%7 == 0 && len(out) < count {
+				out = append(out, s)
+			}
+			seen++
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		all = append(all, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Every seventh row, so the sample is not one corner of the table.
-	out := make([]sample, 0, count)
-	for i := 0; i < len(all) && len(out) < count; i += 7 {
-		out = append(out, all[i])
+		if found == 0 {
+			break
+		}
 	}
 	return out, nil
 }

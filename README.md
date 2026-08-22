@@ -143,6 +143,11 @@ Measured on the V2 dump (97 GB, all parts CRC-verified):
 | Subtitle storage | ~40 GB (after deduplication; 12.9 % of the raw files are duplicates) |
 | Import duration | 8–12 h on a NAS |
 
+Migrating the reference installation — 4.9 million rows of the flat model — took
+18 minutes and produced 2,450,700 uploads, 4,891,788 files and 148,851 distinct
+titles, with the language column collapsing from 120 spellings to 77 real
+languages. A title search against it answers in about 10 ms over HTTP.
+
 An entry that produces no file is counted, not hidden: about 4 % of the archive was truncated when it was collected, a handful of entries are zero bytes, and a few are JSON or HTML error bodies a scraper saved under a `.zip` name. Their catalogue rows are still loaded, so the data model records that Subscene had them.
 
 ---
