@@ -47,8 +47,10 @@ type dialect interface {
 	// cannot run this mode for this query, in which case the caller falls back.
 	titleJoin(b *builder, mode matchMode, query string) (join, score string, ok bool)
 
-	// reindexTitles rebuilds the title index from `uploads`.
-	reindexTitles(ctx context.Context, db *sql.DB) error
+	// refreshTitleIndex brings whatever the dialect searches — a virtual table, a
+	// generated column, a full-text key — in line with the `titles` table the
+	// store has just rebuilt.
+	refreshTitleIndex(ctx context.Context, db *sql.DB) error
 
 	// titleIndexSize reports how many titles are indexed, so a start-up check can
 	// tell an empty index from a stale one.

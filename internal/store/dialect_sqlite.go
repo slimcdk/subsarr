@@ -57,7 +57,7 @@ func (sqliteDialect) titleJoin(b *builder, mode matchMode, query string) (string
 		// titles table is small enough to scan for those.
 		if len([]rune(needle)) < 3 {
 			arg := b.bind("%" + needle + "%")
-			return "JOIN (SELECT slug, 0 AS score FROM titles WHERE title LIKE " + arg +
+			return "JOIN (SELECT slug, 0 AS score FROM titles WHERE normalised LIKE " + arg +
 				") t ON t.slug = u.slug", "t.score", true
 		}
 		arg := b.bind(ftsQuote(needle))
@@ -71,17 +71,15 @@ func ftsQuote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
-func (sqliteDialect) reindexTitles(ctx context.Context, db *sql.DB) error {
+// refreshTitleIndex fills the two virtual tables from `titles`. FTS5 has no
+// generated columns, so the copy is explicit.
+func (sqliteDialect) refreshTitleIndex(ctx context.Context, db *sql.DB) error {
 	stmts := []string{
-		"DELETE FROM titles",
-		// One row per slug: the catalogue holds dozens of uploads per work and
-		// they all carry the same title.
-		"INSERT INTO titles (slug, title) SELECT slug, MIN(title) FROM uploads WHERE slug <> '' GROUP BY slug",
 		"DELETE FROM titles_fts",
-		"INSERT INTO titles_fts (slug, title) SELECT slug, title FROM titles",
+		"INSERT INTO titles_fts (slug, normalised) SELECT slug, normalised FROM titles",
 		"INSERT INTO titles_fts(titles_fts) VALUES('optimize')",
 		"DELETE FROM titles_trgm",
-		"INSERT INTO titles_trgm (slug, title) SELECT slug, title FROM titles",
+		"INSERT INTO titles_trgm (slug, normalised) SELECT slug, normalised FROM titles",
 		"INSERT INTO titles_trgm(titles_trgm) VALUES('optimize')",
 	}
 	for _, stmt := range stmts {

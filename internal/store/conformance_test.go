@@ -210,6 +210,41 @@ func TestConformance_SearchByTitleFallsBackToSubstring(t *testing.T) {
 	})
 }
 
+// A title's punctuation is not a word: the index is built from the same reduced
+// form a query goes through, or "Don't Look Up" and "S.W.A.T." are unfindable
+// under any spelling.
+func TestConformance_SearchByTitleWithPunctuation(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st Store) {
+		seed(t, st,
+			[]Upload{
+				upload("901", "dont-look-up", "Don't Look Up", "tt11286314", "english"),
+				upload("902", "swat", "S.W.A.T.", "tt0257568", "english"),
+			},
+			[]IngestFile{
+				file("f901", "901", "Dont.Look.Up.srt", hash(60)),
+				file("f902", "902", "SWAT.srt", hash(61)),
+			},
+		)
+
+		for _, tc := range []struct{ query, want string }{
+			{"Don't Look Up", "f901"},
+			{"Dont Look Up", "f901"},
+			{"S.W.A.T.", "f902"},
+			{"SWAT", "f902"},
+		} {
+			subs, total, err := st.SearchSubtitles(context.Background(), SearchParams{
+				Query: tc.query, Language: "english", Limit: 50,
+			})
+			if err != nil {
+				t.Fatalf("search %q: %v", tc.query, err)
+			}
+			if total != 1 || len(subs) != 1 || subs[0].ID != tc.want {
+				t.Errorf("query %q found %v (total %d), want [%s]", tc.query, ids(subs), total, tc.want)
+			}
+		}
+	})
+}
+
 // A fragment inside a word is what the substring path exists for: no word match
 // can find it, and Subscene spelled plenty of titles as one word.
 func TestConformance_SearchByTitleFindsAFragment(t *testing.T) {

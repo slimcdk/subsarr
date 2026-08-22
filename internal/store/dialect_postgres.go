@@ -45,24 +45,14 @@ func (postgresDialect) titleJoin(b *builder, mode matchMode, query string) (stri
 
 	default:
 		arg := b.bind("%" + needle + "%")
-		return "JOIN (SELECT slug, 0 AS score FROM titles WHERE title ILIKE " + arg +
+		return "JOIN (SELECT slug, 0 AS score FROM titles WHERE normalised ILIKE " + arg +
 			") t ON t.slug = u.slug", "t.score", true
 	}
 }
 
-func (postgresDialect) reindexTitles(ctx context.Context, db *sql.DB) error {
-	stmts := []string{
-		"DELETE FROM titles",
-		"INSERT INTO titles (slug, title) SELECT slug, MIN(title) FROM uploads WHERE slug <> '' GROUP BY slug",
-		"ANALYZE titles",
-	}
-	for _, stmt := range stmts {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("%s: %w", stmt, err)
-		}
-	}
-	return nil
-}
+// refreshTitleIndex has nothing to do: the searched column is generated from
+// `normalised` and the GIN index follows it.
+func (postgresDialect) refreshTitleIndex(context.Context, *sql.DB) error { return nil }
 
 func (postgresDialect) titleIndexSize(ctx context.Context, db *sql.DB) (int64, error) {
 	var n int64

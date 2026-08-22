@@ -76,12 +76,12 @@ func (mysqlDialect) titleJoin(b *builder, mode matchMode, query string) (string,
 		expr := strings.Join(terms, " ")
 		score := b.bind(expr)
 		match := b.bind(expr)
-		return "JOIN (SELECT slug, MATCH(title) AGAINST (" + score + " IN BOOLEAN MODE) AS score" +
-			" FROM titles WHERE MATCH(title) AGAINST (" + match + " IN BOOLEAN MODE)) t ON t.slug = u.slug", "t.score", true
+		return "JOIN (SELECT slug, MATCH(normalised) AGAINST (" + score + " IN BOOLEAN MODE) AS score" +
+			" FROM titles WHERE MATCH(normalised) AGAINST (" + match + " IN BOOLEAN MODE)) t ON t.slug = u.slug", "t.score", true
 
 	default:
 		arg := b.bind("%" + strings.Join(words, " ") + "%")
-		return "JOIN (SELECT slug, 0 AS score FROM titles WHERE title LIKE " + arg +
+		return "JOIN (SELECT slug, 0 AS score FROM titles WHERE normalised LIKE " + arg +
 			") t ON t.slug = u.slug", "t.score", true
 	}
 }
@@ -92,18 +92,9 @@ func mysqlBooleanTerm(word string) string {
 	return `"` + strings.ReplaceAll(word, `"`, ``) + `"`
 }
 
-func (mysqlDialect) reindexTitles(ctx context.Context, db *sql.DB) error {
-	stmts := []string{
-		"DELETE FROM titles",
-		"INSERT INTO titles (slug, title) SELECT slug, MIN(title) FROM uploads WHERE slug <> '' GROUP BY slug",
-	}
-	for _, stmt := range stmts {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("%s: %w", stmt, err)
-		}
-	}
-	return nil
-}
+// refreshTitleIndex has nothing to do: InnoDB maintains the full-text key on
+// `normalised` as rows are written.
+func (mysqlDialect) refreshTitleIndex(context.Context, *sql.DB) error { return nil }
 
 func (mysqlDialect) titleIndexSize(ctx context.Context, db *sql.DB) (int64, error) {
 	var n int64

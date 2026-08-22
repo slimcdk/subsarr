@@ -526,14 +526,102 @@ func (s *sqlStore) Checkpoint(ctx context.Context) error {
 	return s.d.checkpoint(ctx, s.db)
 }
 
+// reindexBatch is how many distinct titles are rebuilt per transaction.
+const reindexBatch = 2000
+
 // Reindex rebuilds the title index from the catalogue and refreshes the planner
 // statistics. It is derived data, so this is safe to run at any time; the
 // importer runs it once at the end rather than maintaining the index row by row.
+//
+// The rows are normalised on the way in — the same reduction a query goes
+// through — because that is the only place the two sides can be made to agree:
+// no database can be asked to collapse "S.W.A.T." to "swat" the way Go can.
 func (s *sqlStore) Reindex(ctx context.Context) error {
-	if err := s.d.reindexTitles(ctx, s.db); err != nil {
-		return err
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM titles"); err != nil {
+		return fmt.Errorf("clear title index: %w", err)
+	}
+
+	var last string
+	for {
+		page, err := s.readTitles(ctx, last)
+		if err != nil {
+			return err
+		}
+		if len(page) == 0 {
+			break
+		}
+		last = page[len(page)-1].slug
+
+		if err := s.writeTitles(ctx, page); err != nil {
+			return err
+		}
+		if err := s.d.checkpoint(ctx, s.db); err != nil {
+			// A blocked checkpoint is not a failure; the log just stays larger.
+			_ = err
+		}
+	}
+
+	if err := s.d.refreshTitleIndex(ctx, s.db); err != nil {
+		return fmt.Errorf("refresh title index: %w", err)
 	}
 	return s.d.analyze(ctx, s.db)
+}
+
+// indexedTitle is one distinct slug and the title Subscene showed for it.
+type indexedTitle struct {
+	slug  string
+	title string
+}
+
+// readTitles reads the next page of distinct slugs. Paging by slug rather than
+// streaming the whole grouping keeps the read short, so the database can fold its
+// write-ahead log back in between pages.
+func (s *sqlStore) readTitles(ctx context.Context, after string) ([]indexedTitle, error) {
+	b := newBuilder(s.d)
+	b.write("SELECT slug, MIN(title) FROM uploads WHERE slug <> '' AND slug > " + b.bind(after) +
+		" GROUP BY slug ORDER BY slug LIMIT " + b.bind(reindexBatch))
+
+	rows, err := s.db.QueryContext(ctx, b.String(), b.args...)
+	if err != nil {
+		return nil, fmt.Errorf("read titles: %w", err)
+	}
+	defer rows.Close()
+
+	page := make([]indexedTitle, 0, reindexBatch)
+	for rows.Next() {
+		var t indexedTitle
+		if err := rows.Scan(&t.slug, &t.title); err != nil {
+			return nil, err
+		}
+		page = append(page, t)
+	}
+	return page, rows.Err()
+}
+
+func (s *sqlStore) writeTitles(ctx context.Context, page []indexedTitle) error {
+	stmt := "INSERT INTO titles (slug, title, normalised) VALUES (" + s.placeholders(3) + ")" +
+		s.d.upsertSuffix([]string{"slug"}, []string{"title", "normalised"})
+
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		prepared, err := tx.PrepareContext(ctx, stmt)
+		if err != nil {
+			return err
+		}
+		defer prepared.Close()
+
+		for _, t := range page {
+			normalised := title.Normalize(t.title)
+			if normalised == "" {
+				// A title that reduces to nothing cannot be searched for; the
+				// slug still finds it.
+				normalised = title.Normalize(t.slug)
+			}
+			if _, err := prepared.ExecContext(ctx, t.slug, t.title, normalised); err != nil {
+				return fmt.Errorf("index title %s: %w", t.slug, err)
+			}
+		}
+		return nil
+	})
 }
 
 // Optimize is the check every start runs: it makes sure the derived data a

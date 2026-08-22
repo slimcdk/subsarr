@@ -43,14 +43,20 @@ CREATE INDEX IF NOT EXISTS idx_files_upload ON files(upload_id);
 CREATE INDEX IF NOT EXISTS idx_files_content_key ON files(content_key);
 
 -- Title index over the ~150k distinct slugs rather than the millions of uploads.
--- `titles_fts` answers phrase queries, `titles_trgm` substring queries. Both are
--- rebuilt by Store.Reindex; no triggers, because ingest is batch-only.
+--
+-- `normalised` is what is matched: the title reduced to its comparable words, the
+-- same reduction a query goes through, so that "Don't Look Up" and "dont look up"
+-- are the same string on both sides. `title` is kept for display and ordering.
+--
+-- `titles_fts` answers word queries, `titles_trgm` substring queries. All three
+-- are rebuilt by Store.Reindex; no triggers, because ingest is batch-only.
 CREATE TABLE IF NOT EXISTS titles (
-    slug  TEXT PRIMARY KEY,
-    title TEXT NOT NULL DEFAULT ''
+    slug       TEXT PRIMARY KEY,
+    title      TEXT NOT NULL DEFAULT '',
+    normalised TEXT NOT NULL DEFAULT ''
 );
-CREATE VIRTUAL TABLE IF NOT EXISTS titles_fts USING fts5(slug UNINDEXED, title, tokenize='unicode61');
-CREATE VIRTUAL TABLE IF NOT EXISTS titles_trgm USING fts5(slug UNINDEXED, title, tokenize='trigram');
+CREATE VIRTUAL TABLE IF NOT EXISTS titles_fts USING fts5(slug UNINDEXED, normalised, tokenize='unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS titles_trgm USING fts5(slug UNINDEXED, normalised, tokenize='trigram');
 
 -- +goose Down
 DROP TABLE IF EXISTS titles_trgm;
