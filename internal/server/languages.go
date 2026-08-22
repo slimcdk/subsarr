@@ -1,30 +1,23 @@
 package server
 
-import (
-	"encoding/json"
-	"net/http"
-)
+import "net/http"
 
 type languageEntry struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
 
+// handleLanguages lists the languages that actually have subtitle files, so that
+// what the API advertises is what it can deliver.
 func (s *Server) handleLanguages(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListLanguages(r.Context())
+	cat, err := s.loadCatalogue(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	langs := make([]languageEntry, 0, len(rows))
-	for _, r := range rows {
-		langs = append(langs, languageEntry{Name: r.Language, Count: r.Count})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"items":       langs,
-		"total_items": len(langs),
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":       cat.languages,
+		"total_items": len(cat.languages),
 	})
 }

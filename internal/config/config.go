@@ -14,21 +14,27 @@ type Config struct {
 	S3SecretKey    string
 	S3PathStyle    bool
 	Listen         string
+
+	// ImportLanguages is the default language whitelist for an import: a
+	// comma-separated list, empty meaning every language. The --languages flag
+	// wins when both are set.
+	ImportLanguages string
 }
 
 func Load() Config {
 	return Config{
-		DBDriver:       envOr("SUBSARR_DB_DRIVER", "sqlite"),
-		DBDSN:          envOr("SUBSARR_DB_DSN", "subsarr.db"),
-		StorageBackend: envOr("SUBSARR_STORAGE_BACKEND", "filesystem"),
-		StoragePath:    envOr("SUBSARR_STORAGE_PATH", "./storage"),
-		S3Endpoint:     os.Getenv("SUBSARR_S3_ENDPOINT"),
-		S3Bucket:       envOr("SUBSARR_S3_BUCKET", "subsarr"),
-		S3Region:       envOr("SUBSARR_S3_REGION", "us-east-1"),
-		S3AccessKey:    os.Getenv("SUBSARR_S3_ACCESS_KEY"),
-		S3SecretKey:    os.Getenv("SUBSARR_S3_SECRET_KEY"),
-		S3PathStyle:    os.Getenv("SUBSARR_S3_PATH_STYLE") == "true",
-		Listen:         envOr("SUBSARR_LISTEN", "0.0.0.0:8090"),
+		DBDriver:        envOr("SUBSARR_DB_DRIVER", "sqlite"),
+		DBDSN:           envOr("SUBSARR_DB_DSN", "subsarr.db"),
+		StorageBackend:  envOr("SUBSARR_STORAGE_BACKEND", "filesystem"),
+		StoragePath:     envOr("SUBSARR_STORAGE_PATH", "./storage"),
+		S3Endpoint:      os.Getenv("SUBSARR_S3_ENDPOINT"),
+		S3Bucket:        envOr("SUBSARR_S3_BUCKET", "subsarr"),
+		S3Region:        envOr("SUBSARR_S3_REGION", "us-east-1"),
+		S3AccessKey:     os.Getenv("SUBSARR_S3_ACCESS_KEY"),
+		S3SecretKey:     os.Getenv("SUBSARR_S3_SECRET_KEY"),
+		S3PathStyle:     os.Getenv("SUBSARR_S3_PATH_STYLE") == "true",
+		Listen:          envOr("SUBSARR_LISTEN", "0.0.0.0:8090"),
+		ImportLanguages: os.Getenv("SUBSARR_IMPORT_LANGUAGES"),
 	}
 }
 

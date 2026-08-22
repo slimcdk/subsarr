@@ -276,6 +276,7 @@ $RECYCLE.BIN/
 
 pb_data/
 storage/
+data/
 
 *.log
 *.tmp

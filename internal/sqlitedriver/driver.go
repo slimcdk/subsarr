@@ -1,8 +1,7 @@
-// Package sqlitedriver configures a custom SQLite driver that compiles in
-// FTS5, STAT4, SPELLFIX1, and REGEXP support.
-//
-// The driver is registered under the name "sqlite3_subsarr" and used
-// when SUBSARR_DB_DRIVER=sqlite.
+// Package sqlitedriver registers the SQLite driver subsarr uses, named
+// "sqlite3_subsarr". It is the stock mattn/go-sqlite3 driver built with FTS5 and
+// STAT4 (see the build tags in the Makefile), plus the connection settings a
+// read-mostly database of several million rows needs.
 package sqlitedriver
 
 import (
