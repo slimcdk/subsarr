@@ -72,6 +72,33 @@ Expect: a `.sql` catalogue, `subscene_id`, `file_path`, `title`, `imdb_id`,
 If a role says `— not found —`, stop and open an issue with the printed column
 list: importing would lose that field for every row.
 
+### When the catalogue is the last entry
+
+In the V2 dump it is: `Subscene_Metadata.sql` sits at the end of a solid archive,
+so reaching it means decompressing all 107 GB — and the second pass then reads the
+archive again from the front. `inspect-archive` and the import both say so when
+they see it.
+
+Extract it once instead, and hand it to both:
+
+```bash
+docker run --rm \
+  -v "/mnt/user/entertainment/archived/Subscene V2:/dump:ro" \
+  -v "/mnt/user/appdata/subsarr-test:/out" \
+  alpine sh -c "apk add --no-cache p7zip >/dev/null && \
+    7z e '/dump/Subscene V2.7z.001' 'Subscene V2/Subscene_Metadata.sql' -o/out"
+```
+
+Then check that the columns read the way they should — this touches no archive at
+all and answers in seconds:
+
+```bash
+docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr \
+  inspect-archive --catalogue /app/db/Subscene_Metadata.sql
+```
+
+and pass the same file to the import with `--catalogue`.
+
 ---
 
 ## 3. Upgrade the image and migrate

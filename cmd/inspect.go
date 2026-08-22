@@ -36,7 +36,17 @@ and reading the catalogue decompresses everything before it in the archive, whic
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			d, err := dumpFrom(cmd)
 			if err != nil {
-				return err
+				// A catalogue on its own is worth reading: it is how an operator
+				// checks the file they extracted before committing to an import.
+				if d.catalogue == "" {
+					return err
+				}
+				report := newArchiveReport(0)
+				if err := report.readCatalogueFile(d.catalogue); err != nil {
+					return err
+				}
+				report.printCatalogue(cmd.OutOrStdout())
+				return nil
 			}
 			sample, _ := cmd.Flags().GetInt("sample")
 			skipCatalogue, _ := cmd.Flags().GetBool("skip-catalogue")
@@ -280,8 +290,10 @@ func (r *archiveReport) printCatalogue(w io.Writer) {
 
 	fmt.Fprintf(w, "  coverage     %s carry an IMDB id, %s carry an upload id\n",
 		percent(r.withIMDB, r.catalogue.Rows), percent(r.rowsWithID, r.catalogue.Rows))
-	fmt.Fprintf(w, "  entries      %s of the archive's entries have a catalogue row\n",
-		percent(r.catalogue.Rows, r.entries))
+	if r.entries > 0 {
+		fmt.Fprintf(w, "  entries      %s of the archive's entries have a catalogue row\n",
+			percent(r.catalogue.Rows, r.entries))
+	}
 
 	fmt.Fprintf(w, "\nLanguages (%d)\n", len(r.languages))
 	for i, kv := range sortedCounts(r.languages) {

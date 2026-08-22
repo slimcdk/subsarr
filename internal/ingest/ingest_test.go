@@ -565,3 +565,44 @@ func ids(subs []store.Subtitle) []string {
 	}
 	return out
 }
+
+// The archive cuts long names off at the filesystem's path limit, taking the
+// upload id with it — and half the extension and half the language too. The
+// subtitle is still in there.
+func TestIngest_EntriesWhoseNameTheArchiveTruncated(t *testing.T) {
+	h := newHarness(t)
+
+	const slug = "isekai-de-cheat-skill-wo-te-ni-shita-ore-wa-genjitsu-sekai-wo-mo-musou-suru"
+	src := archive.MemorySource{
+		// The name stops mid-language, and the extension with it.
+		{Path: "db/" + slug + "/isekai-de-cheat-skill-wo-te-ni-shita-ore-wa-genjitsu-sek_englis",
+			Content: zipOf(t, map[string]string{"a.srt": srtA})},
+		// A loose file at the archive's root belongs to no work and is not an
+		// upload, however readable it is.
+		{Path: "db/links-to-subs.txt", Content: []byte("{1}{60}not a subtitle")},
+	}
+	h.run(t, src, ingest.Options{})
+
+	subs, total := h.search(t, store.SearchParams{Query: "Isekai De Cheat Skill", Language: "english"})
+	if total != 1 {
+		t.Fatalf("total = %d, want 1 — a truncated name still holds a subtitle", total)
+	}
+	if subs[0].Language != "english" {
+		t.Errorf("language = %q, want the truncated name recovered to english", subs[0].Language)
+	}
+	if subs[0].SubsceneID != "" {
+		t.Errorf("subscene id = %q, want it empty: the archive did not carry one", subs[0].SubsceneID)
+	}
+
+	// And a re-import finds the same row rather than making a second one.
+	before := subs[0].ID
+	h.run(t, src, ingest.Options{})
+	after, total := h.search(t, store.SearchParams{Query: "Isekai De Cheat Skill", Language: "english"})
+	if total != 1 || after[0].ID != before {
+		t.Errorf("re-import produced %v (total %d), want the same single row %s", ids(after), total, before)
+	}
+
+	if _, total := h.search(t, store.SearchParams{Query: "links to subs"}); total != 0 {
+		t.Error("a loose text file at the archive root was imported as a subtitle")
+	}
+}

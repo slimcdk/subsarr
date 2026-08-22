@@ -669,23 +669,42 @@ func uploadFromFilename(name string) store.Upload {
 
 	id := catalogue.SubsceneIDFromPath(name)
 	if id == "" {
-		return store.Upload{}
+		// The archive cuts a name off at the filesystem's path limit, taking the
+		// upload id with it — and sometimes half the extension and half the
+		// language too. The subtitle is still there, so the upload gets an id
+		// derived from its path: stable, so a re-import finds the same row.
+		//
+		// Only for a file that belongs to the work its directory names. The
+		// archive also holds a couple of loose text files at its root, and those
+		// are not uploads at all.
+		if !belongsToDirectory(stem, slug) {
+			return store.Upload{}
+		}
+		id = derivedUploadID(name)
 	}
 
 	// `<slug>_<language>-<id>` and `<slug>_HI_<language>-<id>`: what is left after
-	// the slug prefix and the id suffix is the language.
-	rest := strings.TrimSuffix(stem, "-"+id)
-	rest = strings.TrimPrefix(rest, slug)
-	rest = strings.TrimPrefix(rest, "_")
+	// the slug and the id is the language. The slug is cut off the front by how
+	// much of it the name actually repeats, because a truncated name stops
+	// partway through it.
+	rest := stem[sharedPrefix(stem, slug):]
+	rest = strings.TrimLeft(rest, "_-")
+	rest = strings.TrimSuffix(rest, "-"+id)
 
 	hi := strings.HasPrefix(strings.ToUpper(rest), "HI_")
 	if hi {
 		rest = rest[3:]
 	}
 
+	subsceneID := id
+	if strings.HasPrefix(id, derivedIDPrefix) {
+		// Nothing outside subsarr should read a derived id as a Subscene one.
+		subsceneID = ""
+	}
+
 	return store.Upload{
 		ID:         id,
-		SubsceneID: id,
+		SubsceneID: subsceneID,
 		FilePath:   name,
 		Slug:       slug,
 		Title:      title.FromSlug(slug),
@@ -694,4 +713,41 @@ func uploadFromFilename(name string) store.Upload {
 		Year:       title.YearFromSlug(slug),
 		Releases:   "[]",
 	}
+}
+
+// derivedIDPrefix marks an upload id subsarr made up because the archive's file
+// name did not carry one.
+const derivedIDPrefix = "p"
+
+// minSharedPrefix is how much of its directory's name a file has to repeat before
+// it is taken to belong to that work. Subscene names every file after the work's
+// slug, so a file that does not is not one of its subtitles.
+const minSharedPrefix = 8
+
+// derivedUploadID is a stable id for an entry whose name lost its own, so that
+// re-importing the same archive finds the same row rather than making a new one.
+func derivedUploadID(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return derivedIDPrefix + hex.EncodeToString(sum[:])[:16]
+}
+
+// belongsToDirectory reports whether a file name looks like one of the work its
+// directory names. Either can be cut short by the archive, so it is the shared
+// start that counts.
+func belongsToDirectory(stem, slug string) bool {
+	if slug == "" || stem == "" {
+		return false
+	}
+	shared := sharedPrefix(stem, slug)
+	return shared >= minSharedPrefix || shared == len(slug)
+}
+
+// sharedPrefix is how many bytes two names begin with in common.
+func sharedPrefix(a, b string) int {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	return n
 }

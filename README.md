@@ -256,7 +256,7 @@ Import flags worth knowing:
 | `--resume` | Skip entries a previous run already stored |
 | `--reload-metadata` | Re-read the catalogue even though it is already loaded |
 | `--skip-metadata` | Import file names only, for a dump with no catalogue |
-| `--catalogue PATH` | Read the catalogue from a file instead of from the archive |
+| `--catalogue PATH` | Read the catalogue from a file instead of from the archive — worth it when the dump keeps it at the end of the archive, where reaching it costs a full pass |
 | `--batch N` | Entries per transaction (default 500) |
 
 ---

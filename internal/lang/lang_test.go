@@ -170,3 +170,59 @@ func TestParseList(t *testing.T) {
 		}
 	})
 }
+
+// The archive's file names are cut off at the filesystem's path limit, which
+// leaves the language spelled halfway. A fragment only one language begins with
+// is that language.
+func TestCanonical_RecoversTruncatedNames(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"englis", "english"},
+		{"indone", "indonesian"},
+		{"kurdis", "kurdish"},
+		{"sinhal", "sinhala"},
+		{"brazillian-p", "brazillian-portuguese"},
+		{"farsi_", "farsi_persian"},
+		{"norwegia", "norwegian"},
+	}
+	for _, tc := range tests {
+		if got := Canonical(tc.in); got != tc.want {
+			t.Errorf("Canonical(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// A fragment several languages share says nothing, and guessing between them
+// would file subtitles under a language nobody asked for.
+func TestCanonical_LeavesAmbiguousFragmentsAlone(t *testing.T) {
+	for _, ambiguous := range []string{
+		"ar",   // too short to mean anything
+		"sin",  // sindhi, sinhala — and too short either way
+		"turk", // turkish, turkmen: same length, a real tie
+		"s",
+	} {
+		if got := Canonical(ambiguous); Known(got) {
+			t.Errorf("Canonical(%q) = %q, want it left as an unknown language", ambiguous, got)
+		}
+	}
+}
+
+// Prefix recovery is a last resort: it must never change a name that already
+// resolves, or a language could quietly move.
+func TestCanonical_PrefixRecoveryNeverOverridesAKnownName(t *testing.T) {
+	for _, name := range Names() {
+		if got := Canonical(name); got != name {
+			t.Errorf("Canonical(%q) = %q — prefix recovery changed a known name", name, got)
+		}
+	}
+	for alias, want := range map[string]string{
+		"Brazilian Portuguese": "brazillian-portuguese",
+		"Khmer":                "cambodian-khmer",
+		"chinese":              "chinese-bg-code",
+		"portuguese":           "portuguese",
+		"english":              "english",
+	} {
+		if got := Canonical(alias); got != want {
+			t.Errorf("Canonical(%q) = %q, want %q", alias, got, want)
+		}
+	}
+}

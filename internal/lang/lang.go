@@ -131,7 +131,52 @@ func Canonical(name string) string {
 		return c
 	}
 
+	// The archive's own file names are cut off at the filesystem's path limit,
+	// which leaves a language spelled halfway: `englis`, `indone`, `brazillian p`.
+	// A fragment that only one language begins with is that language; one that
+	// several share says nothing and is left alone.
+	if c, ok := byPrefix(key); ok {
+		return c
+	}
+
 	return strings.ReplaceAll(key, " ", "-")
+}
+
+// minPrefix is how much of a language's name a fragment has to carry before it is
+// treated as that language. Two or three letters are an abbreviation, and
+// guessing at one files subtitles under a language nobody asked for.
+const minPrefix = 4
+
+// byPrefix resolves a name the archive cut short.
+//
+// The shortest candidate wins: a fragment of "english" also begins
+// "english-german", and a dual-language name is never what a truncated one meant.
+// A tie between two names of the same length is a real ambiguity and resolves to
+// nothing.
+func byPrefix(key string) (string, bool) {
+	if len(key) < minPrefix {
+		return "", false
+	}
+
+	var (
+		found string
+		tied  bool
+	)
+	for canonicalKey, name := range byKey {
+		if !strings.HasPrefix(canonicalKey, key) {
+			continue
+		}
+		switch {
+		case found == "" || len(name) < len(found):
+			found, tied = name, false
+		case name != found && len(name) == len(found):
+			tied = true
+		}
+	}
+	if tied {
+		return "", false
+	}
+	return found, found != ""
 }
 
 // Known reports whether a name canonicalises to a language subsarr recognises,
