@@ -11,8 +11,6 @@ import (
 
 type sqliteDialect struct{}
 
-func (sqliteDialect) name() string { return "sqlite" }
-
 func (sqliteDialect) placeholder(int) string { return "?" }
 
 // SQLite has no boolean type; the column is an INTEGER holding 0 or 1.

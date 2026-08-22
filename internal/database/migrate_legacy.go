@@ -79,7 +79,7 @@ func migrateLegacyRows(ctx context.Context, db *sql.DB, driver string) error {
 
 	var (
 		lastID   string
-		uploads  int
+		rows     int // legacy rows read; several can belong to one upload
 		files    int
 		orphaned int
 	)
@@ -107,19 +107,26 @@ func migrateLegacyRows(ctx context.Context, db *sql.DB, driver string) error {
 		if err != nil {
 			return err
 		}
-		uploads += u
+		rows += u
 		files += f
 
-		if uploads%(legacyBatch*50) < legacyBatch {
-			log.Printf("[migrate] legacy data: %d uploads, %d files", uploads, files)
+		if rows%(legacyBatch*50) < legacyBatch {
+			log.Printf("[migrate] legacy data: %d rows, %d files", rows, files)
 			checkpoint(ctx, db, driver)
 		}
 	}
 
-	if uploads > 0 || orphaned > 0 {
-		log.Printf("[migrate] legacy data migrated: %d uploads, %d files, %d rows without a Subscene id skipped",
-			uploads, files, orphaned)
+	if rows == 0 && orphaned == 0 {
+		return nil
 	}
+
+	// The row counts are what the tables ended up holding, not what was read:
+	// several legacy rows can belong to one upload.
+	var uploadCount, fileCount int64
+	_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM uploads").Scan(&uploadCount)
+	_ = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM files").Scan(&fileCount)
+	log.Printf("[migrate] legacy data migrated: %d rows read → %d uploads, %d files (%d rows had no Subscene id)",
+		rows, uploadCount, fileCount, orphaned)
 	return nil
 }
 
@@ -243,7 +250,7 @@ func legacyUploadedAt(driver string) string {
 	}
 }
 
-func writeLegacyBatch(ctx context.Context, db *sql.DB, driver string, batch []legacyRow) (uploads, files int, err error) {
+func writeLegacyBatch(ctx context.Context, db *sql.DB, driver string, batch []legacyRow) (rows, files int, err error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
@@ -282,7 +289,7 @@ func writeLegacyBatch(ctx context.Context, db *sql.DB, driver string, batch []le
 		); err != nil {
 			return 0, 0, fmt.Errorf("migrate upload %s: %w", r.SubsceneID, err)
 		}
-		uploads++
+		rows++
 
 		// A row with no stored content is a catalogue entry, not a file: keeping
 		// it would keep answering downloads with a 404.
@@ -300,8 +307,13 @@ func writeLegacyBatch(ctx context.Context, db *sql.DB, driver string, batch []le
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
-	return uploads, files, nil
+	return rows, files, nil
 }
+
+// The three helpers below duplicate what internal/store's dialects do. That is
+// deliberate: a data migration is pinned to the schema of the moment it was
+// written, and one that followed the store's code as the store evolves would
+// stop reproducing the migration it is supposed to be.
 
 func legacyUploadInsert(driver string) string {
 	cols := []string{"id", "subscene_id", "file_path", "slug", "title", "imdb_id", "language",

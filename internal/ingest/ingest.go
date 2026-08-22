@@ -12,6 +12,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -392,7 +393,7 @@ func (i *Ingester) resolveUploads(ctx context.Context, entries []archive.Entry) 
 		// Both the full path and the bare file name: the V2 catalogue records a
 		// path inside the archive, the V1 one records only the download's name.
 		paths = append(paths, e.Name(), path.Base(e.Name()))
-		if id := subsceneIDFromName(e.Name()); id != "" {
+		if id := catalogue.SubsceneIDFromPath(e.Name()); id != "" {
 			ids = append(ids, id)
 			idOf[e.Name()] = id
 		}
@@ -561,7 +562,7 @@ func (i *Ingester) store(ctx context.Context, c candidate) (bool, error) {
 	if exists {
 		return false, nil
 	}
-	if err := i.stor.Put(ctx, c.key, strings.NewReader(string(c.file.Content)), int64(len(c.file.Content))); err != nil {
+	if err := i.stor.Put(ctx, c.key, bytes.NewReader(c.file.Content), int64(len(c.file.Content))); err != nil {
 		return false, fmt.Errorf("store %s: %w", c.key, err)
 	}
 	return true, nil
@@ -655,7 +656,7 @@ func uploadFromFilename(name string) store.Upload {
 		slug = ""
 	}
 
-	id := subsceneIDFromName(name)
+	id := catalogue.SubsceneIDFromPath(name)
 	if id == "" {
 		return store.Upload{}
 	}
@@ -682,22 +683,4 @@ func uploadFromFilename(name string) store.Upload {
 		Year:       title.YearFromSlug(slug),
 		Releases:   "[]",
 	}
-}
-
-// subsceneIDFromName reads the upload id off the end of an archive file name.
-func subsceneIDFromName(name string) string {
-	base := path.Base(name)
-	stem := strings.TrimSuffix(base, path.Ext(base))
-
-	dash := strings.LastIndex(stem, "-")
-	if dash < 0 || dash == len(stem)-1 {
-		return ""
-	}
-	id := stem[dash+1:]
-	for _, r := range id {
-		if r < '0' || r > '9' {
-			return ""
-		}
-	}
-	return id
 }

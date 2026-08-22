@@ -337,12 +337,7 @@ func (s *sqlStore) UploadsByPath(ctx context.Context, paths []string) (map[strin
 
 	b := newBuilder(s.d)
 	b.write("SELECT " + uploadSelect + " FROM uploads WHERE file_path IN (")
-	for i, p := range paths {
-		if i > 0 {
-			b.write(", ")
-		}
-		b.write(b.bind(p))
-	}
+	b.bindList(paths)
 	b.write(")")
 
 	rows, err := s.db.QueryContext(ctx, b.String(), b.args...)
@@ -372,12 +367,7 @@ func (s *sqlStore) UploadsByID(ctx context.Context, ids []string) (map[string]Up
 
 	b := newBuilder(s.d)
 	b.write("SELECT " + uploadSelect + " FROM uploads WHERE id IN (")
-	for i, id := range ids {
-		if i > 0 {
-			b.write(", ")
-		}
-		b.write(b.bind(id))
-	}
+	b.bindList(ids)
 	b.write(")")
 
 	rows, err := s.db.QueryContext(ctx, b.String(), b.args...)
@@ -407,12 +397,7 @@ func (s *sqlStore) FilesByUpload(ctx context.Context, uploadIDs []string) (map[s
 
 	b := newBuilder(s.d)
 	b.write("SELECT id, upload_id, filename, format, content_hash, content_key, size, downloads FROM files WHERE upload_id IN (")
-	for i, id := range uploadIDs {
-		if i > 0 {
-			b.write(", ")
-		}
-		b.write(b.bind(id))
-	}
+	b.bindList(uploadIDs)
 	b.write(")")
 
 	rows, err := s.db.QueryContext(ctx, b.String(), b.args...)
@@ -491,12 +476,7 @@ func (s *sqlStore) PruneLanguages(ctx context.Context, keep []string, batch int)
 	if err := s.inTx(ctx, func(tx *sql.Tx) error {
 		del := newBuilder(s.d)
 		del.write("DELETE FROM files WHERE id IN (")
-		for i, id := range ids {
-			if i > 0 {
-				del.write(", ")
-			}
-			del.write(del.bind(id))
-		}
+		del.bindList(ids)
 		del.write(")")
 		_, err := tx.ExecContext(ctx, del.String(), del.args...)
 		return err
@@ -535,12 +515,7 @@ func (s *sqlStore) writeNotKept(b *builder, keep []string) {
 		return
 	}
 	b.write(" WHERE u.language NOT IN (")
-	for i, l := range keep {
-		if i > 0 {
-			b.write(", ")
-		}
-		b.write(b.bind(l))
-	}
+	b.bindList(keep)
 	b.write(")")
 }
 

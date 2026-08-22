@@ -43,15 +43,9 @@ archive on a NAS; the service keeps answering while it runs.`,
 			ctx := cmd.Context()
 			flags := cmd.Flags()
 
-			archivePath, _ := flags.GetString("archive")
-			filesDB, _ := flags.GetString("files-db")
-			metadata, _ := flags.GetString("metadata")
-			subtitles, _ := flags.GetString("subtitles")
-			if metadata != "" && subtitles != "" {
-				filesDB = subtitles
-			}
-			if archivePath == "" && filesDB == "" {
-				return fmt.Errorf("provide --archive (a split 7z), --files-db (an extracted directory), or --metadata with --subtitles (a V1 dump)")
+			d, err := dumpFrom(cmd)
+			if err != nil {
+				return err
 			}
 
 			languages, err := resolveLanguages(cmd, cfg)
@@ -86,17 +80,13 @@ archive on a NAS; the service keeps answering while it runs.`,
 
 			skipMetadata, _ := flags.GetBool("skip-metadata")
 			reload, _ := flags.GetBool("reload-metadata")
-			cataloguePath, _ := flags.GetString("catalogue")
-			if metadata != "" {
-				cataloguePath = metadata
-			}
 			if !skipMetadata {
-				if err := loadCatalogue(ctx, in, s.store, archivePath, filesDB, cataloguePath, reload); err != nil {
+				if err := loadCatalogue(ctx, in, s.store, d, reload); err != nil {
 					return err
 				}
 			}
 
-			source, err := openSource(archivePath, filesDB)
+			source, err := d.open()
 			if err != nil {
 				return err
 			}
@@ -138,6 +128,30 @@ archive on a NAS; the service keeps answering while it runs.`,
 	cmd.Flags().Int("limit", 0, "Stop after this many entries (0 = all)")
 
 	return cmd
+}
+
+// dumpFrom reads where the dump is from the flags. A V1 dump names its
+// catalogue and its files separately; a V2 dump holds both.
+func dumpFrom(cmd *cobra.Command) (dump, error) {
+	flags := cmd.Flags()
+	d := dump{}
+	d.archive, _ = flags.GetString("archive")
+	d.directory, _ = flags.GetString("files-db")
+	d.catalogue, _ = flags.GetString("catalogue")
+
+	metadata, _ := flags.GetString("metadata")
+	subtitles, _ := flags.GetString("subtitles")
+	if metadata != "" {
+		d.catalogue = metadata
+	}
+	if subtitles != "" {
+		d.directory = subtitles
+	}
+
+	if d.archive == "" && d.directory == "" {
+		return d, fmt.Errorf("provide --archive (a split 7z), --files-db (an extracted directory), or --metadata with --subtitles (a V1 dump)")
+	}
+	return d, nil
 }
 
 // resolveLanguages reads the whitelist from the flag, falling back to the
@@ -189,7 +203,7 @@ func checkLanguages(ctx context.Context, st store.Store, languages []string) err
 
 // loadCatalogue runs the first pass. It is skipped when the catalogue is already
 // loaded, because on the full archive it is an hour's work that changes nothing.
-func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, archivePath, filesDB, cataloguePath string, reload bool) error {
+func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d dump, reload bool) error {
 	loaded, err := st.CountUploads(ctx)
 	if err != nil {
 		return err
@@ -199,15 +213,15 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, arc
 		return nil
 	}
 
-	if cataloguePath != "" {
-		f, err := os.Open(cataloguePath)
+	if d.catalogue != "" {
+		f, err := os.Open(d.catalogue)
 		if err != nil {
 			return fmt.Errorf("open catalogue: %w", err)
 		}
 		defer f.Close()
 
-		log.Printf("[import] pass 1/2: loading the catalogue from %s …", cataloguePath)
-		result, err := in.LoadCatalogue(ctx, f, catalogueFormat(cataloguePath))
+		log.Printf("[import] pass 1/2: loading the catalogue from %s …", d.catalogue)
+		result, err := in.LoadCatalogue(ctx, f, catalogueFormat(d.catalogue))
 		if err != nil {
 			return err
 		}
@@ -216,7 +230,7 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, arc
 		return nil
 	}
 
-	source, err := openSource(archivePath, filesDB)
+	source, err := d.open()
 	if err != nil {
 		return err
 	}
@@ -268,11 +282,7 @@ func catalogueFormat(name string) ingest.CatalogueFormat {
 }
 
 func describeMapping(result catalogue.Result) string {
-	roles := []string{
-		catalogue.RoleID, catalogue.RolePath, catalogue.RoleTitle, catalogue.RoleIMDB,
-		catalogue.RoleLanguage, catalogue.RoleReleases, catalogue.RoleAuthor,
-		catalogue.RoleAuthorID, catalogue.RoleComment, catalogue.RoleDate, catalogue.RoleSlug,
-	}
+	roles := catalogue.Roles()
 	parts := make([]string, 0, len(roles))
 	for _, role := range roles {
 		column, ok := result.Mapping[role]
@@ -284,10 +294,19 @@ func describeMapping(result catalogue.Result) string {
 	return strings.Join(parts, " ")
 }
 
-func openSource(archivePath, filesDB string) (archive.Source, error) {
-	if archivePath != "" {
-		log.Printf("[import] opening archive %s …", archivePath)
-		return archive.OpenSevenZip(archivePath)
+// dump is where a dump's parts are. A V2 dump is one archive; a V1 dump is a
+// metadata.json plus a subtitles directory; either catalogue can also be handed
+// over separately.
+type dump struct {
+	archive   string
+	directory string
+	catalogue string
+}
+
+func (d dump) open() (archive.Source, error) {
+	if d.archive != "" {
+		log.Printf("[import] opening archive %s …", d.archive)
+		return archive.OpenSevenZip(d.archive)
 	}
-	return archive.OpenDir(filesDB)
+	return archive.OpenDir(d.directory)
 }

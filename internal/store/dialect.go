@@ -24,8 +24,6 @@ const (
 // Everything else — which tables are joined, which filters apply, how results are
 // ordered — lives once in sqlStore, so the three databases cannot drift apart.
 type dialect interface {
-	name() string
-
 	// placeholder returns the bind marker for the n-th argument (1-based).
 	placeholder(n int) string
 
@@ -84,6 +82,17 @@ func (b *builder) bind(v any) string {
 }
 
 func (b *builder) write(s string) { b.sql.WriteString(s) }
+
+// bindList writes a comma-separated list of placeholders and binds the values
+// behind them, for the `IN (…)` lists every batched lookup needs.
+func (b *builder) bindList(values []string) {
+	for i, v := range values {
+		if i > 0 {
+			b.write(", ")
+		}
+		b.write(b.bind(v))
+	}
+}
 
 func (b *builder) String() string { return b.sql.String() }
 

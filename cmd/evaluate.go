@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,7 +63,7 @@ type evaluator struct {
 	store  store.Store
 	db     *sql.DB
 	driver string
-	out    interface{ Write([]byte) (int, error) }
+	out    io.Writer
 }
 
 // sample is one query taken from the data, together with what it was taken from.

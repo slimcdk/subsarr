@@ -12,8 +12,6 @@ import (
 
 type postgresDialect struct{}
 
-func (postgresDialect) name() string { return "postgres" }
-
 func (postgresDialect) placeholder(n int) string { return "$" + strconv.Itoa(n) }
 
 func (postgresDialect) boolArg(v bool) any { return v }

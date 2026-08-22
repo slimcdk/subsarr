@@ -7,6 +7,7 @@
 package archive
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -52,9 +53,6 @@ func OpenSevenZip(path string) (Source, error) {
 	}
 	return &sevenZipSource{reader: r}, nil
 }
-
-// Volumes returns the files a split archive is made of, for logging.
-func (s *sevenZipSource) Volumes() []string { return s.reader.Volumes() }
 
 func (s *sevenZipSource) Each(fn func(Entry) error) error {
 	for _, f := range s.reader.File {
@@ -143,7 +141,7 @@ type MemoryEntry struct {
 func (e MemoryEntry) Name() string { return normalisePath(e.Path) }
 func (e MemoryEntry) Size() int64  { return int64(len(e.Content)) }
 func (e MemoryEntry) Open() (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader(string(e.Content))), nil
+	return io.NopCloser(bytes.NewReader(e.Content)), nil
 }
 
 // MemorySource is a Source over a slice of entries.

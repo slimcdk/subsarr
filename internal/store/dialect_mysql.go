@@ -11,8 +11,6 @@ import (
 
 type mysqlDialect struct{}
 
-func (mysqlDialect) name() string { return "mysql" }
-
 func (mysqlDialect) placeholder(int) string { return "?" }
 
 func (mysqlDialect) boolArg(v bool) any { return v }

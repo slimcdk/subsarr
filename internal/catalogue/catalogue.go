@@ -59,6 +59,14 @@ const (
 	RoleSlug     = "slug"
 )
 
+// Roles are the catalogue's roles in reporting order.
+func Roles() []string {
+	return []string{
+		RoleID, RolePath, RoleTitle, RoleIMDB, RoleLanguage, RoleReleases,
+		RoleAuthor, RoleAuthorID, RoleComment, RoleDate, RoleSlug,
+	}
+}
+
 // roleCandidates maps each role to the column names that mean it, most specific
 // first, followed by the fragments a name may merely contain. The order of the
 // roles themselves matters: `author_id` must be claimed before `id`.
@@ -209,36 +217,40 @@ func rowToUpload(values []string, positions map[string]int) Upload {
 		return values[i]
 	}
 
-	filePath := strings.ReplaceAll(at(RolePath), `\`, "/")
-	slug := slugOf(at(RoleSlug), filePath)
-
-	title := html.UnescapeString(at(RoleTitle))
-	if strings.TrimSpace(title) == "" {
-		title = titlepkg.FromSlug(slug)
-	}
-
-	id := at(RoleID)
-	if id == "" {
-		id = subsceneIDFromPath(filePath)
-	}
-
-	return Upload{
-		SubsceneID: id,
-		FilePath:   filePath,
-		Slug:       slug,
-		Title:      title,
+	upload := Upload{
+		SubsceneID: at(RoleID),
+		FilePath:   at(RolePath),
+		Slug:       at(RoleSlug),
+		Title:      at(RoleTitle),
 		ImdbID:     NormaliseIMDB(at(RoleIMDB)),
 		Language:   lang.Canonical(at(RoleLanguage)),
-		// Subscene did not record hearing impaired in the catalogue; it is in the
-		// file name, which is also where the old importer found it.
-		HI:         strings.Contains(strings.ToUpper(path.Base(filePath)), "_HI_"),
-		Year:       titlepkg.YearFromSlug(slug),
 		Author:     html.UnescapeString(at(RoleAuthor)),
 		AuthorID:   at(RoleAuthorID),
 		Comment:    html.UnescapeString(at(RoleComment)),
 		Releases:   ParseReleases(at(RoleReleases)),
 		UploadedAt: ParseDate(at(RoleDate)),
 	}
+	return complete(upload)
+}
+
+// complete fills in what a catalogue does not state directly, whichever format it
+// was written in: the slug and the id from the file's own path, the title from
+// the slug when there is none, the year Subscene put in the slug, and the
+// hearing-impaired flag, which lives in the file name and nowhere else.
+func complete(u Upload) Upload {
+	u.FilePath = strings.ReplaceAll(u.FilePath, `\`, "/")
+	u.Slug = slugOf(u.Slug, u.FilePath)
+
+	u.Title = html.UnescapeString(u.Title)
+	if strings.TrimSpace(u.Title) == "" {
+		u.Title = titlepkg.FromSlug(u.Slug)
+	}
+	if u.SubsceneID == "" {
+		u.SubsceneID = SubsceneIDFromPath(u.FilePath)
+	}
+	u.HI = strings.Contains(strings.ToUpper(path.Base(u.FilePath)), "_HI_")
+	u.Year = titlepkg.YearFromSlug(u.Slug)
+	return u
 }
 
 var (
@@ -279,9 +291,13 @@ func slugOf(raw, filePath string) string {
 	return ""
 }
 
-// subsceneIDFromPath recovers the upload id from a file name of the shape
-// `<slug>_<language>-<id>.zip`, for the entries the catalogue does not cover.
-func subsceneIDFromPath(filePath string) string {
+// SubsceneIDFromPath recovers the upload id from an archive file name of the
+// shape `<slug>_<language>-<id>.zip`.
+//
+// It is how an entry is matched to its catalogue row when the paths do not line
+// up, how the ~350 entries the catalogue does not cover get an id at all, and how
+// `inspect-archive` reports the names it could not read.
+func SubsceneIDFromPath(filePath string) string {
 	base := path.Base(filePath)
 	base = strings.TrimSuffix(base, path.Ext(base))
 	if m := subsceneID.FindStringSubmatch(base); m != nil {

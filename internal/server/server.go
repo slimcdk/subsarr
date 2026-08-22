@@ -27,12 +27,12 @@ type Server struct {
 
 	// The catalogue view aggregates every row in the database, so it is far too
 	// expensive to recompute per request and only changes on import.
-	mu        sync.Mutex
-	catalogue *catalogue
+	mu   sync.Mutex
+	view *catalogueView
 }
 
-// catalogue is what the API knows about the data as a whole.
-type catalogue struct {
+// catalogueView is what the API knows about the data as a whole.
+type catalogueView struct {
 	languages []languageEntry
 	hasIMDB   bool
 	expires   time.Time
@@ -66,12 +66,12 @@ func (s *Server) Warm(ctx context.Context) error {
 // loadCatalogue returns the cached view, recomputing it when stale. The lock is
 // held across the queries on purpose: concurrent misses would otherwise each run
 // the same expensive aggregate.
-func (s *Server) loadCatalogue(ctx context.Context) (*catalogue, error) {
+func (s *Server) loadCatalogue(ctx context.Context) (*catalogueView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.catalogue != nil && time.Now().Before(s.catalogue.expires) {
-		return s.catalogue, nil
+	if s.view != nil && time.Now().Before(s.view.expires) {
+		return s.view, nil
 	}
 
 	rows, err := s.store.ListLanguages(ctx)
@@ -88,10 +88,10 @@ func (s *Server) loadCatalogue(ctx context.Context) (*catalogue, error) {
 		languages = append(languages, languageEntry{Name: row.Language, Count: row.Count})
 	}
 
-	s.catalogue = &catalogue{
+	s.view = &catalogueView{
 		languages: languages,
 		hasIMDB:   hasIMDB,
 		expires:   time.Now().Add(catalogueTTL),
 	}
-	return s.catalogue, nil
+	return s.view, nil
 }

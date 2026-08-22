@@ -3,12 +3,14 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"sort"
 	"strings"
 
 	"github.com/slimcdk/subsarr/internal/archive"
 	"github.com/slimcdk/subsarr/internal/catalogue"
+	"github.com/slimcdk/subsarr/internal/ingest"
 	"github.com/slimcdk/subsarr/internal/subfile"
 	"github.com/spf13/cobra"
 )
@@ -31,21 +33,25 @@ that your copy of the dump is read the way you expect.
 
   subsarr inspect-archive --archive "/mnt/dump/Subscene V2.7z.001"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			archivePath, _ := cmd.Flags().GetString("archive")
-			filesDB, _ := cmd.Flags().GetString("files-db")
-			if archivePath == "" && filesDB == "" {
-				return fmt.Errorf("provide --archive or --files-db")
+			d, err := dumpFrom(cmd)
+			if err != nil {
+				return err
 			}
 			limit, _ := cmd.Flags().GetInt("limit")
 			out := cmd.OutOrStdout()
 
-			source, err := openSource(archivePath, filesDB)
+			source, err := d.open()
 			if err != nil {
 				return err
 			}
 			defer func() { _ = source.Close() }()
 
 			report := newArchiveReport(limit)
+			if d.catalogue != "" {
+				if err := report.readCatalogueFile(d.catalogue); err != nil {
+					return err
+				}
+			}
 			if err := report.walk(source); err != nil {
 				return err
 			}
@@ -56,6 +62,9 @@ that your copy of the dump is read the way you expect.
 
 	cmd.Flags().String("archive", "", "Path to the first volume of the split 7z")
 	cmd.Flags().String("files-db", "", "Path to an already-extracted dump directory")
+	cmd.Flags().String("catalogue", "", "Read the catalogue from this file instead of from the dump")
+	cmd.Flags().String("metadata", "", "V1 dump: path to metadata.json")
+	cmd.Flags().String("subtitles", "", "V1 dump: path to the subtitles/ directory")
 	cmd.Flags().Int("limit", 0, "Stop after this many entries (0 = all)")
 
 	return cmd
@@ -105,10 +114,14 @@ func (r *archiveReport) walk(source archive.Source) error {
 		r.extensions[ext]++
 
 		if isCatalogue(name) {
+			if r.catalogue != nil {
+				// Already read from a file the operator pointed at.
+				return nil
+			}
 			return r.readCatalogue(e)
 		}
 
-		if subsceneIDOf(name) == "" {
+		if catalogue.SubsceneIDFromPath(name) == "" {
 			r.unparseableN++
 			if len(r.unparseable) < 10 {
 				r.unparseable = append(r.unparseable, name)
@@ -125,14 +138,33 @@ func (r *archiveReport) walk(source archive.Source) error {
 	})
 }
 
+// readCatalogueFile reads a catalogue an operator extracted from the dump, or
+// one that ships beside it.
+func (r *archiveReport) readCatalogueFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open catalogue: %w", err)
+	}
+	defer f.Close()
+	return r.read(path, f, catalogueFormat(path))
+}
+
 func (r *archiveReport) readCatalogue(e archive.Entry) error {
 	rc, err := e.Open()
 	if err != nil {
 		return fmt.Errorf("open %s: %w", e.Name(), err)
 	}
 	defer rc.Close()
+	return r.read(e.Name(), rc, catalogueFormat(e.Name()))
+}
 
-	result, err := catalogue.Read(rc, func(row catalogue.Upload) error {
+func (r *archiveReport) read(name string, body io.Reader, format ingest.CatalogueFormat) error {
+	read := catalogue.Read
+	if format == ingest.CatalogueJSON {
+		read = catalogue.ReadJSON
+	}
+
+	result, err := read(body, func(row catalogue.Upload) error {
 		if row.SubsceneID != "" {
 			r.rowsWithID++
 		}
@@ -146,10 +178,10 @@ func (r *archiveReport) readCatalogue(e archive.Entry) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("read %s: %w", e.Name(), err)
+		return fmt.Errorf("read %s: %w", name, err)
 	}
 	r.catalogue = &result
-	r.catalogueName = e.Name()
+	r.catalogueName = name
 	return nil
 }
 
@@ -194,11 +226,7 @@ func (r *archiveReport) print(w io.Writer) {
 			r.catalogueName, r.catalogue.Table, r.catalogue.Rows, r.catalogue.Skipped)
 		fmt.Fprintf(w, "  columns      %s\n", strings.Join(r.catalogue.Columns, ", "))
 		fmt.Fprintf(w, "  read as\n")
-		for _, role := range []string{
-			catalogue.RoleID, catalogue.RolePath, catalogue.RoleTitle, catalogue.RoleIMDB,
-			catalogue.RoleLanguage, catalogue.RoleReleases, catalogue.RoleAuthor,
-			catalogue.RoleAuthorID, catalogue.RoleComment, catalogue.RoleDate, catalogue.RoleSlug,
-		} {
+		for _, role := range catalogue.Roles() {
 			column, ok := r.catalogue.Mapping[role]
 			if !ok {
 				column = "— not found —"
@@ -237,22 +265,6 @@ func (r *archiveReport) print(w io.Writer) {
 			fmt.Fprintf(w, "  %s\n", name)
 		}
 	}
-}
-
-// subsceneIDOf reports the upload id an entry's file name carries, if any.
-func subsceneIDOf(name string) string {
-	base := path.Base(name)
-	stem := strings.TrimSuffix(base, path.Ext(base))
-	dash := strings.LastIndex(stem, "-")
-	if dash < 0 || dash == len(stem)-1 {
-		return ""
-	}
-	for _, r := range stem[dash+1:] {
-		if r < '0' || r > '9' {
-			return ""
-		}
-	}
-	return stem[dash+1:]
 }
 
 func percent(n, total int) string {

@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"path"
-	"strings"
 
 	"github.com/slimcdk/subsarr/internal/lang"
-	titlepkg "github.com/slimcdk/subsarr/internal/title"
 )
 
 // v1Entry is one object in the "Subscene Final" dump's metadata.json — the older
@@ -60,41 +57,18 @@ func ReadJSON(r io.Reader, fn func(Upload) error) (Result, error) {
 }
 
 func uploadFromV1(entry v1Entry) Upload {
-	// The download name is the file's name inside the dump's subtitles/
-	// directory; it is what an archive entry is matched against.
-	filePath := strings.ReplaceAll(entry.Download, `\`, "/")
-
-	id := entry.SubsceneID
-	if id == "" {
-		id = subsceneIDFromPath(filePath)
-	}
-
-	slug := slugFromOriginal(entry.Original)
-	title := html.UnescapeString(entry.Title)
-	if strings.TrimSpace(title) == "" {
-		title = titlepkg.FromSlug(slug)
-	}
-
-	return Upload{
-		SubsceneID: id,
-		FilePath:   filePath,
-		Slug:       slug,
-		Title:      title,
+	return complete(Upload{
+		SubsceneID: entry.SubsceneID,
+		// The download name is the file's name inside the dump's subtitles/
+		// directory; it is what an archive entry is matched against.
+		FilePath:   entry.Download,
+		Slug:       entry.Original,
+		Title:      entry.Title,
 		ImdbID:     NormaliseIMDB(entry.IMDB),
 		Language:   lang.Canonical(entry.Language),
-		HI:         strings.Contains(strings.ToUpper(path.Base(filePath)), "_HI_"),
-		Year:       titlepkg.YearFromSlug(slug),
 		Author:     html.UnescapeString(entry.Author),
 		Comment:    html.UnescapeString(entry.Comment),
 		Releases:   clean(entry.Releases),
 		UploadedAt: ParseDate(entry.Date),
-	}
-}
-
-// slugFromOriginal reads the slug out of the Subscene URL the V1 dump recorded.
-func slugFromOriginal(original string) string {
-	if m := slugFromURL.FindStringSubmatch(original); m != nil {
-		return m[1]
-	}
-	return ""
+	})
 }
