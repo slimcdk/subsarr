@@ -276,6 +276,10 @@ $RECYCLE.BIN/
 
 pb_data/
 storage/
+data/
+
+# Local agent settings: per-machine permissions, not project configuration.
+.claude/settings.local.json
 
 *.log
 *.tmp

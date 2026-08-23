@@ -1,0 +1,287 @@
+{
+  "_source": {
+    "description": "Language names Bazarr's subsarr provider sends and accepts, generated from its converter by scripts/vendor-bazarr-languages.py. Regenerate after a Bazarr rename; internal/lang/lang_test.go fails when a name subsarr stores is no longer a name Bazarr can request.",
+    "repository": "https://github.com/morpheus65535/bazarr",
+    "files": {
+      "custom_libs/subliminal_patch/converters/subsarr.py": "45776085d097347b65c2d27f228e21a7adb535d5",
+      "custom_libs/subliminal_patch/converters/subsource.py": "debf419665db13e703b990f9055afad68ec12682"
+    },
+    "vendored_at": "2026-08-22"
+  },
+  "languages": {
+    "abkhazian": [
+      "abk"
+    ],
+    "afrikaans": [
+      "afr"
+    ],
+    "albanian": [
+      "sqi"
+    ],
+    "amharic": [
+      "amh"
+    ],
+    "arabic": [
+      "ara"
+    ],
+    "aragonese": [
+      "arg"
+    ],
+    "armenian": [
+      "hye"
+    ],
+    "assamese": [
+      "asm"
+    ],
+    "azerbaijani": [
+      "aze"
+    ],
+    "basque": [
+      "eus"
+    ],
+    "belarusian": [
+      "bel"
+    ],
+    "bengali": [
+      "ben"
+    ],
+    "bosnian": [
+      "bos"
+    ],
+    "brazillian-portuguese": [
+      "por",
+      "BR"
+    ],
+    "breton": [
+      "bre"
+    ],
+    "bulgarian": [
+      "bul"
+    ],
+    "burmese": [
+      "mya"
+    ],
+    "cambodian-khmer": [
+      "khm"
+    ],
+    "catalan": [
+      "cat"
+    ],
+    "chinese-bg-code": [
+      "zho"
+    ],
+    "croatian": [
+      "hrv"
+    ],
+    "czech": [
+      "ces"
+    ],
+    "danish": [
+      "dan"
+    ],
+    "dutch": [
+      "nld"
+    ],
+    "english": [
+      "eng"
+    ],
+    "esperanto": [
+      "epo"
+    ],
+    "estonian": [
+      "est"
+    ],
+    "farsi_persian": [
+      "fas"
+    ],
+    "finnish": [
+      "fin"
+    ],
+    "french": [
+      "fra"
+    ],
+    "gaelic": [
+      "gla"
+    ],
+    "georgian": [
+      "kat"
+    ],
+    "german": [
+      "deu"
+    ],
+    "greek": [
+      "ell"
+    ],
+    "hebrew": [
+      "heb"
+    ],
+    "hindi": [
+      "hin"
+    ],
+    "hungarian": [
+      "hun"
+    ],
+    "icelandic": [
+      "isl"
+    ],
+    "igbo": [
+      "ibo"
+    ],
+    "indonesian": [
+      "ind"
+    ],
+    "interlingua": [
+      "ina"
+    ],
+    "irish": [
+      "gle"
+    ],
+    "italian": [
+      "ita"
+    ],
+    "japanese": [
+      "jpn"
+    ],
+    "kannada": [
+      "kan"
+    ],
+    "kazakh": [
+      "kaz"
+    ],
+    "kinyarwanda": [
+      "kin"
+    ],
+    "korean": [
+      "kor"
+    ],
+    "kurdish": [
+      "kur"
+    ],
+    "latvian": [
+      "lav"
+    ],
+    "lithuanian": [
+      "lit"
+    ],
+    "luxembourgish": [
+      "ltz"
+    ],
+    "macedonian": [
+      "mkd"
+    ],
+    "malay": [
+      "msa"
+    ],
+    "malayalam": [
+      "mal"
+    ],
+    "marathi": [
+      "mar"
+    ],
+    "mongolian": [
+      "mon"
+    ],
+    "navajo": [
+      "nav"
+    ],
+    "nepali": [
+      "nep"
+    ],
+    "northen-sami": [
+      "sme"
+    ],
+    "norwegian": [
+      "nor"
+    ],
+    "occitan": [
+      "oci"
+    ],
+    "pashto": [
+      "pus"
+    ],
+    "polish": [
+      "pol"
+    ],
+    "portuguese": [
+      "por"
+    ],
+    "punjabi": [
+      "pan"
+    ],
+    "romanian": [
+      "ron"
+    ],
+    "russian": [
+      "rus"
+    ],
+    "serbian": [
+      "srp"
+    ],
+    "sindhi": [
+      "snd"
+    ],
+    "sinhala": [
+      "sin"
+    ],
+    "slovak": [
+      "slk"
+    ],
+    "slovenian": [
+      "slv"
+    ],
+    "somali": [
+      "som"
+    ],
+    "spanish": [
+      "spa"
+    ],
+    "sundanese": [
+      "sun"
+    ],
+    "swahili": [
+      "swa"
+    ],
+    "swedish": [
+      "swe"
+    ],
+    "tagalog": [
+      "tgl"
+    ],
+    "tamil": [
+      "tam"
+    ],
+    "tatar": [
+      "tat"
+    ],
+    "telugu": [
+      "tel"
+    ],
+    "thai": [
+      "tha"
+    ],
+    "turkish": [
+      "tur"
+    ],
+    "turkmen": [
+      "tuk"
+    ],
+    "ukranian": [
+      "ukr"
+    ],
+    "urdu": [
+      "urd"
+    ],
+    "uzbek": [
+      "uzb"
+    ],
+    "vietnamese": [
+      "vie"
+    ],
+    "welsh": [
+      "cym"
+    ],
+    "yoruba": [
+      "yor"
+    ]
+  }
+}

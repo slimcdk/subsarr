@@ -2,15 +2,26 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 )
 
+// maxPerPage caps a page. A larger value is clamped rather than refused: it is a
+// request for more than the service will give, not a malformed one.
+const maxPerPage = 200
+
+// writeJSON writes a response. Once the status line is out there is nothing a
+// caller could do about a failed write, so the error is deliberately dropped.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func badRequest(w http.ResponseWriter, err error) {
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 }
 
 func requestBaseURL(u *url.URL, host string, tls bool) string {
@@ -24,19 +35,39 @@ func requestBaseURL(u *url.URL, host string, tls bool) string {
 	return scheme + "://" + host
 }
 
-func intParam(s string, def int) int {
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
+// intParam reads an integer query parameter. An absent or empty value takes the
+// default; a value that is not a number, or is below the minimum this parameter
+// can mean, is a client error — every other value is used as given.
+func intParam(q url.Values, name string, def, minimum int) (int, error) {
+	raw := q.Get(name)
+	if raw == "" {
+		return def, nil
 	}
-	return def
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer, got %q", name, raw)
+	}
+	if n < minimum {
+		return 0, fmt.Errorf("%s must be %d or greater, got %d", name, minimum, n)
+	}
+	return n, nil
 }
 
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
+// boolParam reads a tri-state flag: absent means "either", true and false mean
+// what they say.
+func boolParam(q url.Values, name string) (*bool, error) {
+	raw := q.Get(name)
+	if raw == "" {
+		return nil, nil
 	}
-	if v > hi {
-		return hi
+	switch raw {
+	case "true":
+		v := true
+		return &v, nil
+	case "false":
+		v := false
+		return &v, nil
+	default:
+		return nil, fmt.Errorf("%s must be true or false, got %q", name, raw)
 	}
-	return v
 }

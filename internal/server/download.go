@@ -1,17 +1,25 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 )
 
+// handleDownload streams one subtitle file.
+//
+// Every id a search returns is downloadable: a row only exists when its content
+// was stored, so a 404 here means the id is not ours, not that the service
+// advertised something it does not have.
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing id"})
+		badRequest(w, errors.New("missing id"))
 		return
 	}
 
@@ -25,11 +33,6 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if record.ContentKey == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "subtitle content not available"})
-		return
-	}
-
 	rc, err := s.storage.Get(r.Context(), record.ContentKey)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "subtitle file not found"})
@@ -37,15 +40,37 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rc.Close()
 
-	// Increment download counter (best-effort).
-	go s.store.IncrementDownloads(r.Context(), id)
+	// The counter is part of the ranking, so it must not be lost when the client
+	// disconnects the moment it has the bytes. WithoutCancel keeps the request's
+	// values while dropping its deadline.
+	go func() {
+		if err := s.store.IncrementDownloads(context.WithoutCancel(r.Context()), id); err != nil {
+			log.Printf("download counter for %s: %v", id, err)
+		}
+	}()
 
 	filename := record.Filename
 	if filename == "" {
 		filename = filepath.Base(record.ContentKey)
 	}
 
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitiseFilename(filename)+`"`)
 	w.Header().Set("Content-Type", "application/octet-stream")
-	io.Copy(w, rc)
+	// A copy that fails here is a client that hung up; the file is fine.
+	_, _ = io.Copy(w, rc)
+}
+
+// sanitiseFilename keeps a subtitle's own name from breaking the header it is
+// quoted in. Subscene file names contain anything a user typed.
+func sanitiseFilename(name string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '"', '\\', '\r', '\n':
+			return -1
+		}
+		if r < 0x20 {
+			return -1
+		}
+		return r
+	}, name)
 }

@@ -1,0 +1,419 @@
+openapi: 3.0.3
+
+info:
+  title: subsarr
+  description: |
+    Self-hosted Subscene subtitle provider, designed for use as a custom Bazarr
+    provider.
+
+    The service serves this document at `/api/v1/openapi.yaml`, embedded in the
+    binary, so it always describes the build that is answering.
+
+    Data model: one `upload` per Subscene upload (title, IMDB id, language,
+    release list, uploader, comment, date) and one `file` per downloadable
+    subtitle file extracted from that upload. A search result is a file joined to
+    its upload, and the `id` of a result is the file's — that is what downloads.
+  version: "1.1.0"
+  license:
+    name: MIT
+    url: https://github.com/slimcdk/subsarr/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8090/api/v1
+    description: Local development
+  - url: https://{host}/api/v1
+    description: Production
+    variables:
+      host:
+        default: subsarr.example.com
+
+tags:
+  - name: provider
+    description: Provider discovery
+  - name: subtitles
+    description: Subtitle search and download
+
+paths:
+
+  /info:
+    get:
+      operationId: getInfo
+      tags: [provider]
+      summary: Provider metadata and capabilities
+      description: |
+        Metadata about this installation. The feature flags are derived from the
+        data, not declared: `search_by_imdb_id` is true only when the catalogue
+        actually carries IMDB ids, and `language_filter` only when subtitle files
+        are stored. `version` is the release this binary was built from.
+
+        The values are cached for 15 minutes and warmed at start.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderInfo"
+              example:
+                name: subsarr
+                description: Subscene subtitle database provider
+                version: v1.1.0
+                features:
+                  search_by_imdb_id: true
+                  search_by_title: true
+                  search_by_slug: true
+                  search_by_season_episode: true
+                  hearing_impaired_filter: true
+                  language_filter: true
+
+  /languages:
+    get:
+      operationId: listLanguages
+      tags: [provider]
+      summary: Languages that have subtitle files
+      description: |
+        Every language that has at least one stored subtitle file, with its file
+        count, most common first.
+
+        Languages whose files were never stored — filtered out by an import
+        language whitelist, or holding nothing readable — are not listed: what
+        this endpoint advertises is what the service can deliver.
+
+        Names are the canonical spellings Bazarr's subsarr converter produces.
+        The list is cached for 15 minutes and warmed at start.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LanguageList"
+              example:
+                items:
+                  - name: english
+                    count: 1506862
+                  - name: arabic
+                    count: 710801
+                  - name: farsi_persian
+                    count: 520526
+                total_items: 3
+
+  /subtitles/search:
+    get:
+      operationId: searchSubtitles
+      tags: [subtitles]
+      summary: Search subtitles
+      description: |
+        Search the catalogue. All filters are combined with AND.
+
+        **How a query is matched.** `query` is resolved against a title index
+        over the distinct Subscene slugs: first every word of the query must
+        appear in the title, and only if that finds nothing, the query is matched
+        as a substring. It never matches file names. Results are ordered by exact
+        title first, then by the closest title, then by downloads.
+
+        `imdb_id` is a direct index lookup and is what Bazarr sends first.
+
+        `season` and `episode` are matched as an `S02E05`-style pattern against
+        the uploader's release names and the subtitle's file name. An `episode`
+        without a `season` is ignored — on its own it matches numbers that mean
+        something else.
+
+        `year` matches uploads of that year and uploads whose year is unknown.
+
+        **Validation.** A 400 is returned only for a value that cannot be read at
+        all: a non-integer or negative `page`, `per_page`, `season`, `episode` or
+        `year`, a `page`/`per_page` below 1, or a `hi` that is neither `true` nor
+        `false`. A `per_page` above 200 is clamped rather than refused, and
+        `imdb_id` is passed through unvalidated.
+      parameters:
+        - name: query
+          in: query
+          description: Free-text title search.
+          schema: { type: string }
+          example: The Dark Knight
+        - name: imdb_id
+          in: query
+          description: IMDB id of the film, or of the series for an episode.
+          schema:
+            type: string
+            pattern: '^tt\d{7,8}$'
+          example: tt0468569
+        - name: language
+          in: query
+          description: |
+            Language name. Any spelling the canonicaliser understands is
+            accepted (`Brazilian Portuguese`, `brazillian-portuguese`,
+            `brazilian_portuguese`); results always carry the canonical one.
+          schema: { type: string }
+          example: english
+        - name: slug
+          in: query
+          description: Exact Subscene slug.
+          schema: { type: string }
+          example: the-dark-knight
+        - name: hi
+          in: query
+          description: |
+            `true` returns only hearing-impaired subtitles, `false` only
+            non-hearing-impaired ones. Omit for both.
+          schema: { type: boolean }
+        - name: year
+          in: query
+          description: Release year. `0` means unknown and does not filter.
+          schema: { type: integer, minimum: 0 }
+          example: 2008
+        - name: season
+          in: query
+          schema: { type: integer, minimum: 0 }
+          example: 2
+        - name: episode
+          in: query
+          description: Ignored unless `season` is given.
+          schema: { type: integer, minimum: 0 }
+          example: 5
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          description: Values above 200 are clamped to 200.
+          schema: { type: integer, minimum: 1, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: |
+            A page of results. `items` is always an array, and `total_items` is
+            the exact number of matches, not the size of this page — a client can
+            page through it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResult"
+        "400":
+          description: A parameter value could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: 'per_page must be 1 or greater, got 0'
+        "500":
+          description: The search failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /subtitles/{id}/download:
+    get:
+      operationId: downloadSubtitle
+      tags: [subtitles]
+      summary: Download a subtitle file
+      description: |
+        Return the subtitle file's bytes. The `id` is the one a search result
+        carries, and it survives re-imports: a stored URL keeps working.
+
+        Every id a search returns is downloadable — a result only exists when its
+        content is stored — so a 404 means the id is not this service's.
+
+        The download counter is incremented as a side effect; it is part of the
+        result ordering.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          example: 1efd604a-764f-43cf-9253-408b3a1edc9d
+      responses:
+        "200":
+          description: The subtitle file.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: 'attachment; filename="The.Dark.Knight.2008.srt"'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: No such subtitle, or its file is missing from storage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /openapi.yaml:
+    get:
+      operationId: getOpenAPI
+      tags: [provider]
+      summary: This document
+      responses:
+        "200":
+          description: OK
+          content:
+            application/yaml:
+              schema: { type: string }
+
+components:
+  schemas:
+
+    ProviderInfo:
+      type: object
+      required: [name, description, version, features]
+      properties:
+        name:
+          type: string
+          example: subsarr
+        description:
+          type: string
+        version:
+          type: string
+          description: The release this binary was built from.
+          example: v1.1.0
+        features:
+          $ref: "#/components/schemas/Features"
+
+    Features:
+      type: object
+      required:
+        - search_by_imdb_id
+        - search_by_title
+        - search_by_slug
+        - search_by_season_episode
+        - hearing_impaired_filter
+        - language_filter
+      properties:
+        search_by_imdb_id:
+          type: boolean
+          description: True when the catalogue carries IMDB ids.
+        search_by_title:
+          type: boolean
+        search_by_slug:
+          type: boolean
+        search_by_season_episode:
+          type: boolean
+        hearing_impaired_filter:
+          type: boolean
+        language_filter:
+          type: boolean
+          description: True when subtitle files are stored.
+
+    LanguageList:
+      type: object
+      required: [items, total_items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Language"
+        total_items:
+          type: integer
+          description: The number of languages.
+
+    Language:
+      type: object
+      required: [name, count]
+      properties:
+        name:
+          type: string
+          description: Canonical language name.
+          example: brazillian-portuguese
+        count:
+          type: integer
+          description: Subtitle files in this language.
+
+    SearchResult:
+      type: object
+      required: [items, total_items, page, per_page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Subtitle"
+        total_items:
+          type: integer
+          description: The exact number of matches.
+          example: 137
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    Subtitle:
+      type: object
+      required:
+        - id
+        - subscene_id
+        - title
+        - slug
+        - imdb_id
+        - language
+        - hi
+        - author
+        - releases
+        - filename
+        - format
+        - downloads
+        - download_url
+      properties:
+        id:
+          type: string
+          description: The subtitle file's id — what `download_url` resolves.
+        subscene_id:
+          type: string
+          description: The Subscene upload this file came from.
+        title:
+          type: string
+          description: The title Subscene showed.
+          example: The Dark Knight
+        slug:
+          type: string
+          example: the-dark-knight
+        imdb_id:
+          type: string
+          description: Empty when the catalogue has none for this upload.
+          example: tt0468569
+        language:
+          type: string
+          example: english
+        hi:
+          type: boolean
+          description: Hearing impaired.
+        author:
+          type: string
+          description: The uploader. Empty when unknown.
+        releases:
+          type: array
+          description: The release names the uploader listed. Always an array.
+          items: { type: string }
+          example: ["The.Dark.Knight.2008.720p.BluRay.x264"]
+        comment:
+          type: string
+          description: The uploader's comment. Omitted when empty.
+        year:
+          type: integer
+          description: Omitted when unknown.
+          example: 2008
+        filename:
+          type: string
+          example: The.Dark.Knight.2008.720p.srt
+        format:
+          type: string
+          enum: [srt, sub, ssa, ass, smi, vtt, microdvd]
+        uploaded_at:
+          type: string
+          format: date-time
+          description: Omitted when the catalogue has no date.
+        downloads:
+          type: integer
+        download_url:
+          type: string
+          format: uri
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

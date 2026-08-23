@@ -1,60 +1,25 @@
+// Command subsarr is a self-hosted Subscene subtitle provider for Bazarr.
 package main
 
 import (
+	"context"
 	"log"
-	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/slimcdk/subsarr/cmd/importcmd"
+	"github.com/slimcdk/subsarr/cmd"
 	"github.com/slimcdk/subsarr/internal/config"
-	"github.com/slimcdk/subsarr/internal/database"
-	"github.com/slimcdk/subsarr/internal/server"
-	"github.com/slimcdk/subsarr/internal/storage"
-	"github.com/slimcdk/subsarr/internal/store"
-	"github.com/spf13/cobra"
 )
 
 func main() {
-	cfg := config.Load()
+	// An import runs for hours; Ctrl-C or a container stop has to end it at the
+	// next batch boundary rather than in the middle of one.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	root := &cobra.Command{
-		Use:   "subsarr",
-		Short: "Self-hosted Subscene subtitle provider",
-	}
-
-	serve := &cobra.Command{
-		Use:   "serve",
-		Short: "Start the HTTP server",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			db, err := database.Open(cfg.DBDriver, cfg.DBDSN)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-
-			if err := database.Migrate(db, cfg.DBDriver); err != nil {
-				return err
-			}
-
-			st, err := store.New(db, cfg.DBDriver)
-			if err != nil {
-				return err
-			}
-
-			stor, err := storage.New(cfg)
-			if err != nil {
-				return err
-			}
-
-			srv := server.New(st, stor)
-			log.Printf("listening on %s (driver=%s)", cfg.Listen, cfg.DBDriver)
-			return http.ListenAndServe(cfg.Listen, srv.Routes())
-		},
-	}
-
-	root.AddCommand(serve, importcmd.NewCommand(cfg))
-
-	if err := root.Execute(); err != nil {
+	if err := cmd.Root(config.Load()).ExecuteContext(ctx); err != nil {
+		log.Printf("error: %v", err)
 		os.Exit(1)
 	}
 }

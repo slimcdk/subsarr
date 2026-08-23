@@ -2,11 +2,13 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 // S3 stores files in an S3-compatible object store.
@@ -47,6 +49,27 @@ func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	return output.Body, nil
+}
+
+// Exists reports whether an object is already stored. HEAD is cheap enough that
+// the importer asks before every write and skips the ones already there.
+func (s *S3) Exists(ctx context.Context, key string) (bool, error) {
+	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+	})
+	if err == nil {
+		return true, nil
+	}
+	var notFound *types.NotFound
+	if errors.As(err, &notFound) {
+		return false, nil
+	}
+	var noSuchKey *types.NoSuchKey
+	if errors.As(err, &noSuchKey) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (s *S3) Delete(ctx context.Context, key string) error {

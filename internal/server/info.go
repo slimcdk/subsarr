@@ -1,9 +1,6 @@
 package server
 
-import (
-	"encoding/json"
-	"net/http"
-)
+import "net/http"
 
 type providerInfo struct {
 	Name        string   `json:"name"`
@@ -21,19 +18,28 @@ type features struct {
 	LanguageFilter  bool `json:"language_filter"`
 }
 
-func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(providerInfo{
+// handleInfo reports what this installation can actually do. search_by_imdb_id
+// is read from the data rather than declared: an installation imported before the
+// catalogue existed has no IMDB ids, and a client that trusted a hardcoded true
+// would search for them anyway and find nothing.
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	cat, err := s.loadCatalogue(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, providerInfo{
 		Name:        "subsarr",
 		Description: "Subscene subtitle database provider",
-		Version:     "1.0.0",
+		Version:     s.version,
 		Features: features{
-			SearchByIMDB:    true,
+			SearchByIMDB:    cat.hasIMDB,
 			SearchByTitle:   true,
 			SearchBySlug:    true,
 			SearchBySeason:  true,
 			HearingImpaired: true,
-			LanguageFilter:  true,
+			LanguageFilter:  len(cat.languages) > 0,
 		},
 	})
 }

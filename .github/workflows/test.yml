@@ -1,0 +1,86 @@
+name: Test
+
+# Called by the image build, which is what every push and pull request triggers.
+# Running on push as well would run the whole three-database suite twice.
+on:
+  workflow_call:
+
+env:
+  # The build tags compile FTS5 (the title index) and STAT4 (the statistics the
+  # planner needs) into go-sqlite3. Without them the SQLite tests fail on the
+  # search path only, which is exactly the part that must not regress.
+  GO_TAGS: sqlite_fts5 sqlite_stat4
+
+jobs:
+  test:
+    name: test (${{ matrix.dialects }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dialects: sqlite, postgres, mariadb
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: subsarr
+          POSTGRES_USER: subsarr
+          POSTGRES_PASSWORD: subsarr
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U subsarr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_DATABASE: subsarr
+          MARIADB_ROOT_PASSWORD: root
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet -tags "$GO_TAGS" ./...
+
+      - name: go test
+        env:
+          CGO_ENABLED: 1
+          SUBSARR_TEST_POSTGRES_DSN: postgres://subsarr:subsarr@localhost:5432/subsarr?sslmode=disable
+          SUBSARR_TEST_MYSQL_DSN: root:root@tcp(localhost:3306)/subsarr
+          # Without a DSN the suite skips that dialect; here it must fail instead.
+          SUBSARR_TEST_REQUIRE_DIALECTS: "1"
+        # -race is what catches the concurrent catalogue cache and the detached
+        # download counter.
+        run: go test -tags "$GO_TAGS" -race -count=1 ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          # Pinned: `latest` turns a new release into a red build on a commit
+          # that changed nothing.
+          version: v2.12.2

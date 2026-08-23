@@ -1,7 +1,7 @@
 # ── Build ──────────────────────────────────────────────────────────────────────
 FROM golang:1.26-alpine AS builder
 
-# CGO is required for mattn/go-sqlite3 (FTS5 + STAT4 + SPELLFIX1 + REGEXP).
+# CGO is required for mattn/go-sqlite3 (FTS5 + STAT4).
 RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /build
@@ -11,15 +11,15 @@ RUN go mod download
 
 COPY . .
 
+ARG VERSION=dev
 RUN CGO_ENABLED=1 GOOS=linux \
-    CGO_CFLAGS="-I$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)" \
     go build \
     -tags "sqlite_fts5 sqlite_stat4" \
-    -ldflags="-s -w -extldflags=-static" \
-    -o subsarr ./main.go
+    -ldflags="-s -w -extldflags=-static -X github.com/slimcdk/subsarr/internal/version.Version=${VERSION}" \
+    -o subsarr .
 
 # ── Runtime ────────────────────────────────────────────────────────────────────
-FROM alpine:3.23
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata
 

@@ -1,28 +1,24 @@
-FROM golang:1.23-bookworm
+# The devcontainers Go image, so the `vscode` user, the mounts and the features
+# in devcontainer.json all work; this adds what this repo needs on top.
+FROM mcr.microsoft.com/devcontainers/go:2-1.26-bookworm
 
-# Install common dev tools
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    wget \
-    unzip \
-    zip \
+# sqlite3 for looking at a database by hand, zip for building test fixtures,
+# python3 for scripts/vendor-bazarr-languages.py.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
+    zip \
     sqlite3 \
     python3 \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go tools
-RUN go install golang.org/x/tools/gopls@latest \
-    && go install github.com/go-delve/delve/cmd/dlv@latest \
-    && go install golang.org/x/tools/cmd/goimports@latest \
-    && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest \
-    && go install github.com/air-verse/air@latest
+# The tools the Makefile and the editor settings expect. goose is a library here,
+# not a CLI: migrations are embedded in the binary and applied by it, and sqlc is
+# gone with the per-dialect generated code it used to produce.
+USER vscode
+RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+USER root
 
-# Create workspace directory
 WORKDIR /workspace
 
-# Set Go env
-ENV GOPATH=/go
-ENV PATH=$PATH:/go/bin
+# CGO is required for go-sqlite3; the build tags come from the Makefile.
+ENV CGO_ENABLED=1
