@@ -128,37 +128,38 @@ Storage keys are content-addressed (`content/<aa>/<bb>/<sha256>.srt`), so identi
 
 ### Reference numbers
 
-Measured on the V2 dump (97 GB, all parts CRC-verified):
+Measured on the V2 dump (97 GB in 12 volumes, 106.8 GB of entries), importing
+Danish only and extrapolating from it:
 
 | | |
 |---|---|
-| Archive entries | ~2,556,800 |
-| Covered by the catalogue | 2,556,454 (99.99 %) |
+| Archive entries | 2,556,808 |
+| Catalogue rows | 2,558,080, none unreadable |
 | Uploads with an IMDB id | 89.9 % |
-| Distinct titles | ~150,000 |
-| Subtitle files after import | ~4.9 million |
-| Languages | 90 requestable, ~120 present |
-| SQLite database | ~3.5 GB |
-| Free space needed to migrate an existing one | ~1× the database, plus ~1 GB |
-| Subtitle storage | ~250 GB (measured: 55 KB per stored file, after deduplication) |
-| Import duration | 8–12 h on a NAS |
+| Languages in the catalogue | 77 |
+| Distinct titles | 150,037 |
+| Entries that are not zips | 94,600 RAR, 11,220 raw subtitle files |
+| Catalogue extraction (`7z e`) | 17 s, 953 MB |
+| Catalogue load (pass 1) | ~5 min at ~8,900 rows/s |
+| Full archive, Danish only (pass 2) | 1 h 17 m at ~550 entries/s, 0 errors |
+| Danish subtitle files | 160,603 in 7.5 GB — 51 KB each |
+| Database, catalogue plus Danish files | 1.6 GB |
 
-Migrating the reference installation — 4.9 million rows of the flat model — took
-18 minutes and produced 2,450,700 uploads, 4,891,788 files and 148,851 distinct
-titles, with the language column collapsing from 120 spellings to 77 real
-languages. Replaying 2,000 Bazarr-shaped title queries against it
-(`subsarr evaluate-search`):
+Danish is 2.9 % of the catalogue. Scaling from it, a full import of every language
+is roughly **5.5 million subtitle files in 250–300 GB**, in a database of about
+3 GB. Size storage for that, not for the archive's 97 GB: what is stored is the
+subtitles unpacked, and a subtitle is about 50 KB of text.
 
-| | p50 | p95 | worst |
-|---|---|---|---|
-| Title search | 0.8 ms | 2.8 ms | 104 ms |
-| Title search that matches nothing | 2.1 ms | 4.5 ms | 11 ms |
-| The scan this replaced | 3.0 s | 5.9 s | |
+The counters explain every entry that produced no file. Over the whole archive,
+with Danish selected: 2,483,021 skipped by language, 222 holding nothing
+recognisable, 18 truncated when the archive was collected, 1 an error body a
+scraper saved under a `.zip` name.
 
-Every one of the 2,000 queries returned the work it was taken from, and the
-narrowed search found everything the old scan found.
-
-An entry that produces no file is counted, not hidden: about 4 % of the archive was truncated when it was collected, a handful of entries are zero bytes, and a few are JSON or HTML error bodies a scraper saved under a `.zip` name. Their catalogue rows are still loaded, so the data model records that Subscene had them.
+Two things the dump does that subsarr works around, both measured: it writes an
+IMDB id as a plain integer with 0 for none, so 925 old films' ids are just a few
+digits; and it cuts a title at the first character it could not write, so 126,864
+titles (5 %) stop at an apostrophe or an accent — `Don` for Don't Look Up. Those
+titles are rebuilt from Subscene's own slug, which is intact.
 
 ---
 

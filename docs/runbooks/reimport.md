@@ -62,11 +62,18 @@ For PostgreSQL or MariaDB use `pg_dump` / `mariadb-dump` instead.
 Storage is not backed up: it is rebuilt from the archive, and the import only
 adds to it until the old objects are no longer referenced.
 
-**Free space.** The data migration writes the catalogue model alongside the flat
-table before dropping it, so keep roughly the size of the database free — about
-4 GB for the reference installation — plus a gigabyte for the write-ahead log.
-SQLite does not shrink the file after dropping the old table; the space is reused
-by the import, and `VACUUM` reclaims it if you would rather have it back.
+**Free space.** Two separate numbers.
+
+The data migration writes the catalogue model alongside the flat table before
+dropping it, so keep roughly the size of the database free — about 4 GB for the
+reference installation — plus a gigabyte for the write-ahead log. SQLite does not
+shrink the file after dropping the old table; the space is reused by the import,
+and `VACUUM` reclaims it if you would rather have it back.
+
+Storage is the larger one: a full import of every language is **250–300 GB** of
+subtitle files, measured. Importing Danish alone took 7.5 GB. What is stored is
+the subtitles unpacked, not the archive, so the archive's 97 GB is not the
+figure to size against. `--languages` is how you decide which of it you keep.
 
 ---
 
