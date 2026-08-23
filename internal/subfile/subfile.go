@@ -16,8 +16,10 @@ import (
 	"io"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/nwaples/rardecode/v2"
+	"golang.org/x/text/encoding/charmap"
 )
 
 // MaxFileSize is the largest subtitle file that will be stored. Anything larger
@@ -113,6 +115,28 @@ func Extract(name string, data []byte) ([]File, Reason) {
 	return []File{{Name: path.Base(name), Format: format, Content: data}}, ReasonNone
 }
 
+// decodeName renders an archive member's name as text.
+//
+// A zip written before UTF-8 names were flagged carries the bytes of whatever
+// code page the machine that made it used, and this archive was made on Windows:
+// `\xC4nglavakt DANSK.srt` is Änglavakt. Left as they are, those bytes are not
+// valid UTF-8 — PostgreSQL and MySQL reject the row outright, losing the subtitle,
+// and SQLite keeps it but serves a name full of replacement characters. On the
+// real dump that is 4.5 % of the files.
+func decodeName(name string, nonUTF8 bool) string {
+	name = path.Base(name)
+	if !nonUTF8 && utf8.ValidString(name) {
+		return name
+	}
+	decoded, err := charmap.Windows1252.NewDecoder().String(name)
+	if err != nil || !utf8.ValidString(decoded) {
+		// Windows-1252 leaves five bytes undefined. Nothing readable can be made
+		// of those, but the name still has to be storable.
+		return strings.ToValidUTF8(name, "\uFFFD")
+	}
+	return decoded
+}
+
 func isZip(data []byte) bool {
 	return len(data) >= 4 && data[0] == 'P' && data[1] == 'K' &&
 		(data[2] == 3 || data[2] == 5 || data[2] == 7)
@@ -174,7 +198,7 @@ func fromZip(data []byte) ([]File, error) {
 		if err != nil || len(content) == 0 || len(content) > MaxFileSize {
 			continue
 		}
-		files = append(files, File{Name: path.Base(zf.Name), Format: format, Content: content})
+		files = append(files, File{Name: decodeName(zf.Name, zf.NonUTF8), Format: format, Content: content})
 	}
 	return files, nil
 }
@@ -209,7 +233,7 @@ func fromRAR(data []byte) ([]File, error) {
 		if err != nil || len(content) == 0 || len(content) > MaxFileSize {
 			continue
 		}
-		files = append(files, File{Name: path.Base(header.Name), Format: format, Content: content})
+		files = append(files, File{Name: decodeName(header.Name, false), Format: format, Content: content})
 	}
 	return files, nil
 }

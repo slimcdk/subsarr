@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"testing"
+	"unicode/utf8"
 )
 
 func zipOf(t *testing.T, files map[string]string) []byte {
@@ -145,5 +146,63 @@ func TestExtract_MicroDVDIsNotAnErrorBody(t *testing.T) {
 	files, reason := Extract("a.txt", []byte("{1}{60}Hello|World\n{61}{120}Goodbye"))
 	if reason != ReasonNone || len(files) != 1 {
 		t.Errorf("got %d files, reason %q; want the MicroDVD subtitle", len(files), reason)
+	}
+}
+
+// A zip written before UTF-8 names were flagged carries the bytes of the code
+// page the machine that made it used. The real dump is full of them: 4.5 % of the
+// Danish files, and every one of them is a row PostgreSQL and MySQL refuse.
+func TestExtract_NamesThatAreNotUTF8(t *testing.T) {
+	// `\xC4nglavakt DANSK.srt` — Änglavakt, as Windows wrote it.
+	raw := "\xC4nglavakt DANSK.srt"
+	if utf8.ValidString(raw) {
+		t.Fatal("the fixture is supposed to be invalid UTF-8")
+	}
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write([]byte(srt))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	files, reason := Extract("a.zip", buf.Bytes())
+	if reason != ReasonNone || len(files) != 1 {
+		t.Fatalf("got %d files, reason %q", len(files), reason)
+	}
+	if !utf8.ValidString(files[0].Name) {
+		t.Errorf("name %q is not valid UTF-8; a database will refuse the row", files[0].Name)
+	}
+	if files[0].Name != "Änglavakt DANSK.srt" {
+		t.Errorf("name = %q, want %q", files[0].Name, "Änglavakt DANSK.srt")
+	}
+}
+
+// A name that is already UTF-8 must survive untouched, including one that only
+// looks like it needs decoding.
+func TestExtract_NamesThatAreUTF8AreLeftAlone(t *testing.T) {
+	for _, name := range []string{
+		"Änglavakt DANSK.srt",
+		"日本語字幕.srt",
+		"Ünnepi.srt",
+		"plain.srt",
+	} {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		w, _ := zw.Create(name)
+		w.Write([]byte(srt))
+		zw.Close()
+
+		files, reason := Extract("a.zip", buf.Bytes())
+		if reason != ReasonNone || len(files) != 1 {
+			t.Fatalf("%s: got %d files, reason %q", name, len(files), reason)
+		}
+		if files[0].Name != name {
+			t.Errorf("name = %q, want it unchanged as %q", files[0].Name, name)
+		}
 	}
 }

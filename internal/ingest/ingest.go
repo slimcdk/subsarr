@@ -23,6 +23,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/slimcdk/subsarr/internal/archive"
@@ -220,19 +221,30 @@ func uploadFromCatalogue(row catalogue.Upload) (store.Upload, bool) {
 	return store.Upload{
 		ID:         row.SubsceneID,
 		SubsceneID: row.SubsceneID,
-		FilePath:   row.FilePath,
+		FilePath:   text(row.FilePath),
 		Slug:       row.Slug,
-		Title:      row.Title,
+		Title:      text(row.Title),
 		ImdbID:     row.ImdbID,
 		Language:   row.Language,
 		HI:         row.HI,
 		Year:       row.Year,
-		Author:     row.Author,
+		Author:     text(row.Author),
 		AuthorID:   row.AuthorID,
-		Comment:    row.Comment,
-		Releases:   string(releases),
+		Comment:    text(row.Comment),
+		Releases:   text(string(releases)),
 		UploadedAt: row.UploadedAt,
 	}, true
+}
+
+// text keeps a value a database will accept. PostgreSQL and MySQL refuse a row
+// whose text is not valid UTF-8 — the whole row, not the offending field — so a
+// byte the dump got from somewhere else must not be able to cost a subtitle, or
+// on the catalogue pass, the entire import.
+func text(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 func nonNil(v []string) []string {
@@ -529,7 +541,7 @@ func (i *Ingester) writeFiles(ctx context.Context, candidates []candidate) error
 		rows = append(rows, store.IngestFile{
 			ID:          c.id,
 			UploadID:    c.upload.ID,
-			Filename:    c.file.Name,
+			Filename:    text(c.file.Name),
 			Format:      c.file.Format,
 			ContentHash: c.hash,
 			ContentKey:  c.key,

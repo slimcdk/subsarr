@@ -58,12 +58,14 @@ func (mysqlDialect) titleJoin(b *builder, mode matchMode, query string) (string,
 
 	switch mode {
 	case matchAllWords:
-		var terms []string
+		var terms, unindexed []string
 		for _, w := range words {
 			if len([]rune(w)) < innodbMinTokenSize {
+				unindexed = append(unindexed, w)
 				continue
 			}
 			if _, stop := innodbStopwords[w]; stop {
+				unindexed = append(unindexed, w)
 				continue
 			}
 			terms = append(terms, "+"+mysqlBooleanTerm(w))
@@ -76,8 +78,20 @@ func (mysqlDialect) titleJoin(b *builder, mode matchMode, query string) (string,
 		expr := strings.Join(terms, " ")
 		score := b.bind(expr)
 		match := b.bind(expr)
+
+		// A word the index cannot hold is still a word the query asked for.
+		// Without this, "24 - Eighth Season" drops the 24 and matches every
+		// eighth season there is — which is 221 results where the other two
+		// dialects find 203. The full-text match has already narrowed the rows,
+		// so filtering them costs nothing.
+		var filters strings.Builder
+		for _, w := range unindexed {
+			filters.WriteString(" AND normalised LIKE " + b.bind("%"+w+"%"))
+		}
+
 		return "JOIN (SELECT slug, MATCH(normalised) AGAINST (" + score + " IN BOOLEAN MODE) AS score" +
-			" FROM titles WHERE MATCH(normalised) AGAINST (" + match + " IN BOOLEAN MODE)) t ON t.slug = u.slug", "t.score", true
+			" FROM titles WHERE MATCH(normalised) AGAINST (" + match + " IN BOOLEAN MODE)" + filters.String() +
+			") t ON t.slug = u.slug", "t.score", true
 
 	default:
 		arg := b.bind("%" + strings.Join(words, " ") + "%")

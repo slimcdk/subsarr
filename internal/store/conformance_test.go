@@ -653,3 +653,33 @@ func TestConformance_OptimizeIsSafeAtAnyTime(t *testing.T) {
 		}
 	})
 }
+
+// A word too short for a full-text index is still a word the query asked for.
+// On the real dump, "24 - Eighth Season" without it matches every eighth season
+// there is: 221 results on MySQL where the other two dialects find 203.
+func TestConformance_SearchByTitleHonoursShortWords(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st Store) {
+		seed(t, st,
+			[]Upload{
+				upload("951", "24-eighth-season", "24 - Eighth Season", "tt0285331", "danish"),
+				upload("952", "lost-eighth-season", "Lost - Eighth Season", "tt0411008", "danish"),
+				upload("953", "24-first-season", "24 - First Season", "tt0285331", "danish"),
+			},
+			[]IngestFile{
+				file("f951", "951", "24.S08.srt", hash(70)),
+				file("f952", "952", "Lost.S08.srt", hash(71)),
+				file("f953", "953", "24.S01.srt", hash(72)),
+			},
+		)
+
+		subs, total, err := st.SearchSubtitles(context.Background(), SearchParams{
+			Query: "24 - Eighth Season", Language: "danish", Limit: 50,
+		})
+		if err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if total != 1 || len(subs) != 1 || subs[0].ID != "f951" {
+			t.Errorf("got %v (total %d), want only [f951] — the other eighth season is not a 24", ids(subs), total)
+		}
+	})
+}
