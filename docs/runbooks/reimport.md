@@ -16,7 +16,20 @@ Paths below are the reference installation's; substitute your own.
 
 ---
 
-## 0. Check Bazarr first
+## 0. If you already imported with a branch image
+
+The upload id changed while this branch was being tested: it is the Subscene id
+from the file's own path, where an earlier build stored the dump's row number. A
+database imported with one of those builds cannot be corrected by re-importing —
+the new rows arrive alongside the old ones — so start it from an empty database:
+stop the service, delete the database file (or drop and recreate the schema), and
+run the import again. Storage can stay: it is content-addressed, so a re-import
+finds every object already there and writes almost nothing.
+
+Nothing released is affected; this only applies to a `feat-…`, `pr-…` or `sha-…`
+image pulled before this note existed.
+
+## 1. Check Bazarr first
 
 subsarr stores the language names Bazarr's converter produces. A Bazarr older
 than its 2026-08-16 converter change spells two of them differently and would
@@ -31,7 +44,7 @@ Everything except Brazilian Portuguese and Chinese works either way.
 
 ---
 
-## 1. Back up
+## 2. Back up
 
 The database is the only thing that cannot be rebuilt from the archive.
 
@@ -57,7 +70,7 @@ by the import, and `VACUUM` reclaims it if you would rather have it back.
 
 ---
 
-## 2. Look at the dump
+## 3. Look at the dump
 
 Check that your copy of the archive is read the way it should be — in particular
 that the catalogue is found and its columns are mapped sensibly.
@@ -105,7 +118,7 @@ and pass the same file to the import with `--catalogue`.
 
 ---
 
-## 3. Upgrade the image and migrate
+## 4. Upgrade the image and migrate
 
 ```bash
 docker compose -f /srv/subsarr/docker-compose.yaml pull subsarr
@@ -131,7 +144,7 @@ ids, and `/info` reports what the data actually holds. The import fixes that.
 
 ---
 
-## 4. Rehearse
+## 5. Rehearse
 
 Measure the rate on a scratch database before touching production.
 
@@ -150,7 +163,7 @@ measures reading and hashing without writing anything.
 
 ---
 
-## 5. Run it
+## 6. Run it
 
 ```bash
 docker compose -f /srv/subsarr/docker-compose.yaml run --rm -d --name subsarr-import \
@@ -176,7 +189,7 @@ Watch for:
 
 ---
 
-## 6. Verify
+## 7. Verify
 
 ```bash
 # The catalogue arrived
@@ -233,7 +246,7 @@ recall of 1.0000; anything else is worth an issue.
 
 ---
 
-## 7. Reclaim space (optional)
+## 8. Reclaim space (optional)
 
 Only if you imported with a whitelist narrower than what is already stored, or
 want to narrow it now:
