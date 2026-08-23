@@ -120,7 +120,7 @@ archive on a NAS; the service keeps answering while it runs.`,
 
 	cmd.Flags().String("archive", "", "Path to the first volume of the split 7z — streamed, never extracted")
 	cmd.Flags().String("files-db", "", "Path to an already-extracted dump directory")
-	cmd.Flags().String("catalogue", "", "Read the catalogue from this file instead of from the archive")
+	cmd.Flags().String("catalogue", "", "Read the catalogue from this file rather than from the dump (for a dump that keeps it elsewhere)")
 	cmd.Flags().String("metadata", "", "V1 dump: path to metadata.json")
 	cmd.Flags().String("subtitles", "", "V1 dump: path to the subtitles/ directory")
 	cmd.Flags().String("languages", "", "Only store files for these languages (comma separated; empty = all)")
@@ -245,20 +245,9 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d d
 
 	log.Print("[import] pass 1/2: loading the catalogue …")
 	found := false
-	scanned := 0
 	err = source.Each(func(e archive.Entry) error {
-		scanned++
 		if !ingest.IsCatalogue(e.Name()) {
 			return nil
-		}
-
-		// Entry names are free — they come from the archive's header — but
-		// opening one is not: in a solid archive everything before it has to be
-		// decompressed, and pass 2 then starts again from the front.
-		if scanned > lateCatalogue {
-			log.Printf("[import] the catalogue is entry %d of the archive; reading it decompresses "+
-				"everything before it, and pass 2 will read the archive again from the start. "+
-				"Extracting it once and passing --catalogue avoids that.", scanned)
 		}
 		rc, err := e.Open()
 		if err != nil {
@@ -283,10 +272,6 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d d
 	}
 	return nil
 }
-
-// lateCatalogue is how far into an archive the catalogue has to be before it is
-// worth telling an operator that extracting it separately would be quicker.
-const lateCatalogue = 100_000
 
 func catalogueFormat(name string) ingest.CatalogueFormat {
 	if strings.EqualFold(path.Ext(name), ".json") {

@@ -92,36 +92,22 @@ Expect: a `.sql` catalogue, `subscene_id`, `file_path`, `title`, `imdb_id`,
 If a role says `— not found —`, stop and open an issue with the printed column
 list: importing would lose that field for every row.
 
-### When the catalogue is the last entry
+### The catalogue
 
-In the V2 dump it is: `Subscene_Metadata.sql` sits at the end of a solid archive,
-so reaching it means decompressing all 107 GB — and the second pass then reads the
-archive again from the front. `inspect-archive` and the import both say so when
-they see it.
+In the V2 dump it is `Subscene_Metadata.sql`, the very last entry of the archive.
+That costs nothing: a 7z archive is stored in blocks — 27 of them here — and only
+the block holding the catalogue has to be decompressed to read it. Measured on the
+reference dump, the import spends about ten seconds reaching it and two minutes
+reading it, and then streams the archive once for the files.
 
-Extract it once instead, and hand it to both:
-
-```bash
-docker run --rm \
-  -v "/mnt/array/dumps/subscene:/dump:ro" \
-  -v "/mnt/cache/subsarr/db:/out" \
-  alpine sh -c "apk add --no-cache p7zip >/dev/null && \
-    7z e '/dump/Subscene V2.7z.001' 'Subscene V2/Subscene_Metadata.sql' -o/out"
-```
-
-`/out` has to be the directory the service mounts as `/app/db`, or the next
-command cannot see the file. It took 17 seconds and produced 953 MB on the
-reference dump.
-
-Then check that the columns read the way they should — this touches no archive at
-all and answers in seconds:
+So there is nothing to extract and no extra step. `--catalogue` exists for a dump
+that keeps its catalogue somewhere else, or to reload it without touching the
+archive:
 
 ```bash
 docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr \
   inspect-archive --catalogue /app/db/Subscene_Metadata.sql
 ```
-
-and pass the same file to the import with `--catalogue`.
 
 ---
 

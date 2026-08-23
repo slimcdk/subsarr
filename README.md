@@ -139,8 +139,7 @@ Danish only and extrapolating from it:
 | Languages in the catalogue | 77 |
 | Distinct titles | 150,037 |
 | Entries that are not zips | 94,600 RAR, 11,220 raw subtitle files |
-| Catalogue extraction (`7z e`) | 17 s, 953 MB |
-| Catalogue load (pass 1) | ~5 min at ~8,900 rows/s |
+| Catalogue, read from the archive and loaded (pass 1) | ~5 min at ~8,900 rows/s; reaching it in the archive costs ~10 s |
 | Full archive, Danish only (pass 2) | 1 h 17 m at ~550 entries/s, 0 errors |
 | Danish subtitle files | 160,603 in 7.5 GB — 51 KB each |
 | Database, catalogue plus Danish files | 1.6 GB |
@@ -257,7 +256,7 @@ Import flags worth knowing:
 | `--resume` | Skip entries a previous run already stored |
 | `--reload-metadata` | Re-read the catalogue even though it is already loaded |
 | `--skip-metadata` | Import file names only, for a dump with no catalogue |
-| `--catalogue PATH` | Read the catalogue from a file instead of from the archive — worth it when the dump keeps it at the end of the archive, where reaching it costs a full pass |
+| `--catalogue PATH` | Read the catalogue from a file rather than from the dump — for a dump that keeps it elsewhere, or to reload it without touching the archive |
 | `--batch N` | Entries per transaction (default 500, capped at 5000) |
 
 ---

@@ -28,9 +28,10 @@ that your copy of the dump is read the way you expect.
 
 Every entry's name is listed — that is free, it comes from the archive's header —
 so the counts and the answer about the catalogue cover the whole dump. Opening an
-entry is what costs: --sample bounds how many are opened to see what they hold,
-and reading the catalogue decompresses everything before it in the archive, which
---skip-catalogue avoids.
+entry is what costs: --sample bounds how many are opened to see what they hold.
+Reading the catalogue costs about as long as parsing it, since a 7z archive is
+read block by block and only the catalogue's own block has to be decompressed;
+--skip-catalogue skips it when only the entry counts are wanted.
 
   subsarr inspect-archive --archive "/mnt/dump/Subscene V2.7z.001"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -82,11 +83,6 @@ and reading the catalogue decompresses everything before it in the archive, whic
 			default:
 				fmt.Fprintf(out, "\nReading the catalogue: %s, entry %d of %d …\n",
 					report.catalogueEntry.Name(), report.cataloguePosition, report.entries)
-				if report.cataloguePosition > report.entries/2 {
-					fmt.Fprintf(out, "  It sits late in a solid archive, so this decompresses everything\n"+
-						"  before it. Extract it once and pass --catalogue to skip that, here and\n"+
-						"  on the import.\n")
-				}
 				if err := report.readCatalogue(report.catalogueEntry); err != nil {
 					return err
 				}
@@ -99,7 +95,7 @@ and reading the catalogue decompresses everything before it in the archive, whic
 
 	cmd.Flags().String("archive", "", "Path to the first volume of the split 7z")
 	cmd.Flags().String("files-db", "", "Path to an already-extracted dump directory")
-	cmd.Flags().String("catalogue", "", "Read the catalogue from this file instead of from the dump")
+	cmd.Flags().String("catalogue", "", "Read the catalogue from this file rather than from the dump")
 	cmd.Flags().String("metadata", "", "V1 dump: path to metadata.json")
 	cmd.Flags().String("subtitles", "", "V1 dump: path to the subtitles/ directory")
 	cmd.Flags().Int("sample", 300, "Entries to open to see what they hold (0 = none); every entry's name is listed regardless")
