@@ -437,46 +437,59 @@ func (i *Ingester) checkpoint(ctx context.Context) {
 // whose paths carry a different prefix than the catalogue's would otherwise look
 // like a dump with no metadata at all.
 func (i *Ingester) resolveUploads(ctx context.Context, entries []archive.Entry) (map[string]store.Upload, error) {
-	paths := make([]string, 0, len(entries)*2)
+	out := make(map[string]store.Upload, len(entries))
+
+	// The Subscene id is the upload's primary key and the archive writes it into
+	// every file name, so this resolves all but a handful of entries with one
+	// index seek each. Asking by path first would mean an IN list three times the
+	// batch size on every batch, which on the real archive is most of the time a
+	// resumed run spends.
 	ids := make([]string, 0, len(entries))
 	idOf := make(map[string]string, len(entries))
-
 	for _, e := range entries {
-		// The archive names an entry from the root of the dump; the V2 catalogue
-		// records it from the directory the subtitles live in, and the V1 one
-		// records only the download's name. All three are tried.
-		paths = append(paths, e.Name(), workRelativePath(e.Name()), path.Base(e.Name()))
 		if id := catalogue.SubsceneIDFromPath(e.Name()); id != "" {
 			ids = append(ids, id)
 			idOf[e.Name()] = id
 		}
 	}
 
-	byPath, err := i.st.UploadsByPath(ctx, paths)
-	if err != nil {
-		return nil, fmt.Errorf("resolve uploads by path: %w", err)
-	}
 	byID, err := i.st.UploadsByID(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("resolve uploads by id: %w", err)
 	}
 
-	out := make(map[string]store.Upload, len(entries))
+	var unresolved []archive.Entry
 	for _, e := range entries {
-		if u, ok := byPath[e.Name()]; ok {
-			out[e.Name()] = u
-			continue
-		}
-		if u, ok := byPath[workRelativePath(e.Name())]; ok {
-			out[e.Name()] = u
-			continue
-		}
-		if u, ok := byPath[path.Base(e.Name())]; ok {
-			out[e.Name()] = u
-			continue
-		}
 		if u, ok := byID[idOf[e.Name()]]; ok {
 			out[e.Name()] = u
+			continue
+		}
+		unresolved = append(unresolved, e)
+	}
+	if len(unresolved) == 0 {
+		return out, nil
+	}
+
+	// What is left is an entry whose name lost its id, or a dump whose catalogue
+	// records paths that do not line up with the archive's. The archive names an
+	// entry from the root of the dump; the V2 catalogue records it from the
+	// directory the subtitles live in, and the V1 one records only the download's
+	// name. All three are tried.
+	paths := make([]string, 0, len(unresolved)*3)
+	for _, e := range unresolved {
+		paths = append(paths, e.Name(), workRelativePath(e.Name()), path.Base(e.Name()))
+	}
+
+	byPath, err := i.st.UploadsByPath(ctx, paths)
+	if err != nil {
+		return nil, fmt.Errorf("resolve uploads by path: %w", err)
+	}
+	for _, e := range unresolved {
+		for _, key := range []string{e.Name(), workRelativePath(e.Name()), path.Base(e.Name())} {
+			if u, ok := byPath[key]; ok {
+				out[e.Name()] = u
+				break
+			}
 		}
 	}
 	return out, nil
