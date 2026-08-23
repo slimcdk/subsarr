@@ -48,7 +48,7 @@ func (sqliteDialect) titleJoin(b *builder, mode matchMode, query string) (string
 		arg := b.bind(strings.Join(terms, " "))
 		// FTS5 rank is more negative the better the match; negate it so that the
 		// shared ordering can treat every dialect's score as higher-is-better.
-		return "JOIN (SELECT slug, rank AS score FROM titles_fts WHERE titles_fts MATCH " + arg +
+		return "JOIN (SELECT slug, normalised, rank AS score FROM titles_fts WHERE titles_fts MATCH " + arg +
 			") t ON t.slug = u.slug", "-t.score", true
 
 	default:
@@ -57,11 +57,11 @@ func (sqliteDialect) titleJoin(b *builder, mode matchMode, query string) (string
 		// titles table is small enough to scan for those.
 		if len([]rune(needle)) < 3 {
 			arg := b.bind("%" + needle + "%")
-			return "JOIN (SELECT slug, 0 AS score FROM titles WHERE normalised LIKE " + arg +
+			return "JOIN (SELECT slug, normalised, 0 AS score FROM titles WHERE normalised LIKE " + arg +
 				") t ON t.slug = u.slug", "t.score", true
 		}
 		arg := b.bind(ftsQuote(needle))
-		return "JOIN (SELECT slug, 0 AS score FROM titles_trgm WHERE titles_trgm MATCH " + arg +
+		return "JOIN (SELECT slug, normalised, 0 AS score FROM titles_trgm WHERE titles_trgm MATCH " + arg +
 			") t ON t.slug = u.slug", "t.score", true
 	}
 }

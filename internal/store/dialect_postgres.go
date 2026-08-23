@@ -40,12 +40,12 @@ func (postgresDialect) titleJoin(b *builder, mode matchMode, query string) (stri
 		// film title changes what it means.
 		rank := b.bind(needle)
 		match := b.bind(needle)
-		return "JOIN (SELECT slug, ts_rank(tsv, plainto_tsquery('simple', " + rank + ")) AS score" +
+		return "JOIN (SELECT slug, normalised, ts_rank(tsv, plainto_tsquery('simple', " + rank + ")) AS score" +
 			" FROM titles WHERE tsv @@ plainto_tsquery('simple', " + match + ")) t ON t.slug = u.slug", "t.score", true
 
 	default:
 		arg := b.bind("%" + needle + "%")
-		return "JOIN (SELECT slug, 0 AS score FROM titles WHERE normalised ILIKE " + arg +
+		return "JOIN (SELECT slug, normalised, 0 AS score FROM titles WHERE normalised ILIKE " + arg +
 			") t ON t.slug = u.slug", "t.score", true
 	}
 }

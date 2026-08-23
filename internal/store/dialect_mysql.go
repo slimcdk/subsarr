@@ -89,13 +89,13 @@ func (mysqlDialect) titleJoin(b *builder, mode matchMode, query string) (string,
 			filters.WriteString(" AND normalised LIKE " + b.bind("%"+w+"%"))
 		}
 
-		return "JOIN (SELECT slug, MATCH(normalised) AGAINST (" + score + " IN BOOLEAN MODE) AS score" +
+		return "JOIN (SELECT slug, normalised, MATCH(normalised) AGAINST (" + score + " IN BOOLEAN MODE) AS score" +
 			" FROM titles WHERE MATCH(normalised) AGAINST (" + match + " IN BOOLEAN MODE)" + filters.String() +
 			") t ON t.slug = u.slug", "t.score", true
 
 	default:
 		arg := b.bind("%" + strings.Join(words, " ") + "%")
-		return "JOIN (SELECT slug, 0 AS score FROM titles WHERE normalised LIKE " + arg +
+		return "JOIN (SELECT slug, normalised, 0 AS score FROM titles WHERE normalised LIKE " + arg +
 			") t ON t.slug = u.slug", "t.score", true
 	}
 }

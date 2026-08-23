@@ -202,8 +202,13 @@ func (s *sqlStore) buildSearch(p SearchParams, mode *matchMode, count bool) (*bu
 		// Exact title first, then the closest titles: Bazarr only reads the
 		// first page, so the ranking decides whether it sees the right subtitle
 		// at all. The engine score is a tie-break, never the primary key.
-		exact := b.bind(title.Slugify(p.Query))
-		order = "CASE WHEN u.slug = " + exact + " THEN 0 ELSE 1 END ASC, " +
+		//
+		// The title counts as well as the slug, because Subscene's slug often
+		// carries a year the title does not — `dont-look-up-2021` for Dont Look
+		// Up — and an exact title is an exact title.
+		exactSlug := b.bind(title.Slugify(p.Query))
+		exactTitle := b.bind(title.Normalize(p.Query))
+		order = "CASE WHEN u.slug = " + exactSlug + " OR t.normalised = " + exactTitle + " THEN 0 ELSE 1 END ASC, " +
 			s.d.lengthFn() + "(u.title) ASC, " + score + " DESC, " + order
 	}
 	b.write(" ORDER BY " + order)

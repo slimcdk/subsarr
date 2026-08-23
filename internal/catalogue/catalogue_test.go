@@ -303,7 +303,7 @@ func TestReadJSON(t *testing.T) {
 	if second.SubsceneID != "99" {
 		t.Errorf("subscene id = %q, want it recovered from the download name", second.SubsceneID)
 	}
-	if !second.HI || second.Year != 1946 || second.Title != "Its A Wonderful Life 1946" {
+	if !second.HI || second.Year != 1946 || second.Title != "Its A Wonderful Life" {
 		t.Errorf("got %+v", second)
 	}
 }
@@ -434,6 +434,40 @@ func TestParseReleases_TheDumpsRealShapes(t *testing.T) {
 			if strings.ContainsAny(name, `"[]`) {
 				t.Errorf("%s: %q still carries JSON punctuation", tc.what, name)
 			}
+		}
+	}
+}
+
+// The dump's title column stops at the first character the tool that built it
+// could not write. Subscene's slug carries the whole title, transliterated.
+func TestRead_RepairsTitlesTheDumpCutShort(t *testing.T) {
+	tests := []struct {
+		what, title, slug, want string
+	}{
+		{"cut at an apostrophe", "Don", "dont-look-up-2021", "Dont Look Up"},
+		{"cut at an accent", "1 Journ", "1-journe", "1 Journe"},
+		{"cut mid-word later on", "10 Things You Don", "10-things-you-dont-know-about-first-season",
+			"10 Things You Dont Know About First Season"},
+		{"cut at an ampersand", "10th ", "10th-and-wolf", "10th And Wolf"},
+
+		// Left alone: the slug saying more than the title is normal.
+		{"a year in the slug", "The Dark Knight", "the-dark-knight-2008", "The Dark Knight"},
+		{"aliases in the slug", "Look Up", "look-up-the-same-sky-yi-yang", "Look Up"},
+		{"an exact match", "Up", "up-2009", "Up"},
+		{"a title the slug does not start with", "Batman: The Dark Knight", "the-dark-knight",
+			"Batman: The Dark Knight"},
+	}
+	for _, tc := range tests {
+		source := "CREATE TABLE `all_subs` (`id` int, `title` text, `lang` text, `fileLink` text);\n" +
+			"INSERT INTO `all_subs` VALUES (1,'" + strings.ReplaceAll(tc.title, "'", "''") +
+			"','danish','" + tc.slug + "/" + tc.slug + "_danish-1234.zip');\n"
+
+		rows, _ := readAll(t, source)
+		if len(rows) != 1 {
+			t.Fatalf("%s: got %d rows", tc.what, len(rows))
+		}
+		if rows[0].Title != tc.want {
+			t.Errorf("%s: title = %q, want %q", tc.what, rows[0].Title, tc.want)
 		}
 	}
 }

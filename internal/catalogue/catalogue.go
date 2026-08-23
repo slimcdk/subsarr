@@ -242,8 +242,16 @@ func complete(u Upload) Upload {
 	u.Slug = slugOf(u.Slug, u.FilePath)
 
 	u.Title = html.UnescapeString(u.Title)
+	if truncatedTitle(u.Title, u.Slug) {
+		// The dump's title column is cut at the first character the tool that
+		// built it could not write — an apostrophe, an accent, an ampersand.
+		// `Don` is Don't Look Up; `1 Journ` is 1 Journée. That is 5 % of the
+		// catalogue, and a title nobody can search for. Subscene's own slug
+		// carries the whole thing, transliterated but complete.
+		u.Title = titlepkg.FromSlug(withoutYear(u.Slug))
+	}
 	if strings.TrimSpace(u.Title) == "" {
-		u.Title = titlepkg.FromSlug(u.Slug)
+		u.Title = titlepkg.FromSlug(withoutYear(u.Slug))
 	}
 	// The dump's own `id` column is its row number — 1, 2, 3 — not the upload id
 	// Subscene used. That id is in the file's path, on every row of the real
@@ -261,6 +269,7 @@ func complete(u Upload) Upload {
 
 var (
 	imdbDigits  = regexp.MustCompile(`(\d+)`)
+	slugYear    = regexp.MustCompile(`-((?:19|20)\d{2})$`)
 	subsceneID  = regexp.MustCompile(`-(\d+)(?:\.[A-Za-z0-9]+)?$`)
 	slugFromURL = regexp.MustCompile(`/subtitles/([^/?#]+)`)
 )
@@ -322,6 +331,44 @@ func isSubsceneID(v string) bool {
 		}
 	}
 	return true
+}
+
+// withoutYear drops the year Subscene appends to a slug to tell two works of the
+// same name apart. It belongs in the year column, not in the title.
+func withoutYear(slug string) string {
+	return slugYear.ReplaceAllString(slug, "")
+}
+
+// truncatedTitle reports whether the dump cut a title short.
+//
+// It compares the title against the slug word by word: a title that stops part
+// of the way through one of the slug's words, or that ends on a separator with
+// the slug carrying on, is what the dump does to a title it could not write in
+// full. A title that simply says less than the slug — the slug's trailing year,
+// the alternative names Subscene piles into it — is left alone.
+func truncatedTitle(title, slug string) bool {
+	if title == "" || slug == "" {
+		return false
+	}
+
+	titleWords := titlepkg.Words(title)
+	slugWords := titlepkg.Words(withoutYear(slug))
+	if len(titleWords) == 0 || len(slugWords) == 0 || len(titleWords) > len(slugWords) {
+		return false
+	}
+	for i, w := range titleWords[:len(titleWords)-1] {
+		if w != slugWords[i] {
+			return false
+		}
+	}
+
+	last, against := titleWords[len(titleWords)-1], slugWords[len(titleWords)-1]
+	if last != against {
+		return strings.HasPrefix(against, last)
+	}
+	// The whole last word is there, but the title stops on a separator the dump
+	// could not write — "10th " for "10th & Wolf".
+	return len(titleWords) < len(slugWords) && title != strings.TrimRight(title, " -&")
 }
 
 // SubsceneIDFromPath recovers the upload id from an archive file name of the

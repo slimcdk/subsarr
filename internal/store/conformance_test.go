@@ -683,3 +683,38 @@ func TestConformance_SearchByTitleHonoursShortWords(t *testing.T) {
 		}
 	})
 }
+
+// Subscene's slug usually carries a year the title does not, so an exact title
+// must rank first on its own — the slug will not match the query.
+func TestConformance_ExactTitleRanksFirstDespiteTheSlugsYear(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st Store) {
+		seed(t, st,
+			[]Upload{
+				upload("961", "dont-look-up-2021", "Dont Look Up", "tt11286314", "danish", withYear(2021)),
+				upload("962", "dont-look-up-1996", "Dont Look Up", "tt0116303", "danish", withYear(1996)),
+				upload("963", "dont-look-up-at-the-sky", "Dont Look Up At The Sky", "tt9999999", "danish"),
+			},
+			[]IngestFile{
+				file("f961", "961", "DLU.2021.srt", hash(80)),
+				file("f962", "962", "DLU.1996.srt", hash(81)),
+				file("f963", "963", "DLUATS.srt", hash(82)),
+			},
+		)
+
+		subs, total, err := st.SearchSubtitles(context.Background(), SearchParams{
+			Query: "Don't Look Up", Language: "danish", Limit: 50,
+		})
+		if err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if total != 3 {
+			t.Fatalf("total = %d, want 3", total)
+		}
+		for _, sub := range subs[:2] {
+			if sub.Title != "Dont Look Up" {
+				t.Errorf("order = %v; the exact title has to come before the longer one", ids(subs))
+				break
+			}
+		}
+	})
+}
