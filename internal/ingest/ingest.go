@@ -39,6 +39,9 @@ import (
 // holds about 2.5 million entries, so this is roughly 250 lines for a whole run.
 const progressEvery = 10_000
 
+// maxBatch keeps the per-batch lookups inside every driver's parameter limit.
+const maxBatch = 5000
+
 // checkpointEvery is how many entries pass between two checkpoints of whatever
 // the database writes ahead of its data file.
 const checkpointEvery = 50_000
@@ -124,11 +127,19 @@ type Ingester struct {
 	nextReport int
 	// nextCheckpoint is the entry count at which the log is next folded back in.
 	nextCheckpoint int
+	// incomplete holds uploads whose storage failed, so that resuming does not
+	// mistake "has some files" for "is finished".
+	incomplete map[string]struct{}
 }
 
 func New(st store.Store, stor storage.Store, opts Options) *Ingester {
 	if opts.Batch <= 0 {
 		opts.Batch = 500
+	}
+	// Each entry contributes three bound parameters to the lookup that opens a
+	// batch, and every driver has a ceiling on those.
+	if opts.Batch > maxBatch {
+		opts.Batch = maxBatch
 	}
 
 	var allow map[string]struct{}
@@ -147,6 +158,7 @@ func New(st store.Store, stor storage.Store, opts Options) *Ingester {
 		start:          time.Now(),
 		nextReport:     progressEvery,
 		nextCheckpoint: checkpointEvery,
+		incomplete:     map[string]struct{}{},
 	}
 }
 
@@ -258,6 +270,11 @@ func nonNil(v []string) []string {
 
 // Run streams a source and ingests every entry it holds.
 func (i *Ingester) Run(ctx context.Context, src archive.Source) error {
+	// The rate belongs to this pass. Measured from the start of the run it would
+	// be entries divided by the hours the catalogue pass took, which is what an
+	// operator multiplies up into an ETA.
+	i.start = time.Now()
+
 	batch := make([]archive.Entry, 0, i.opts.Batch)
 
 	err := src.Each(func(e archive.Entry) error {
@@ -331,6 +348,18 @@ func (i *Ingester) processBatch(ctx context.Context, entries []archive.Entry) er
 	}
 
 	for _, entry := range entries {
+		// The dump's catalogue is an entry like any other, and a 953 MB one. Pass
+		// one has already read it; pass two must not invent an upload for it.
+		if IsCatalogue(entry.Name()) {
+			continue
+		}
+		// The size comes from the archive's header, so this costs nothing and
+		// saves reading a quarter of a gigabyte to throw it away.
+		if entry.Size() > subfile.MaxEntrySize {
+			i.stats.TooLarge++
+			continue
+		}
+
 		upload, ok := uploads[entry.Name()]
 		if !ok {
 			upload = uploadFromFilename(entry.Name())
@@ -350,8 +379,9 @@ func (i *Ingester) processBatch(ctx context.Context, entries []archive.Entry) er
 		}
 
 		// Resuming: this upload already has stored files, so a previous run got
-		// this far. Decompressing and hashing it again would change nothing.
-		if i.opts.Resume && len(existing[upload.ID]) > 0 {
+		// this far. Decompressing and hashing it again would change nothing —
+		// unless a file of its own failed to store earlier in this run.
+		if _, failed := i.incomplete[upload.ID]; i.opts.Resume && !failed && len(existing[upload.ID]) > 0 {
 			i.stats.Resumed++
 			continue
 		}
@@ -527,7 +557,12 @@ func (i *Ingester) writeFiles(ctx context.Context, candidates []candidate) error
 		if !i.opts.DryRun {
 			stored, err := i.store(ctx, c)
 			if err != nil {
+				// Silently dropping this would leave an upload that looks
+				// finished to the next resumed run, so it is both reported and
+				// remembered.
+				log.Printf("[import] store %s (%s): %v", c.file.Name, c.key, err)
 				i.stats.Errors++
+				i.incomplete[c.upload.ID] = struct{}{}
 				continue
 			}
 			if stored {
@@ -558,8 +593,14 @@ func (i *Ingester) writeFiles(ctx context.Context, candidates []candidate) error
 		i.stats.Errors += i.ingestIndividually(ctx, rows)
 	}
 
-	// Only now that the rows are committed is the old object unreferenced.
+	// Only now that the rows are committed can the old object be unreferenced —
+	// and only if nothing else points at it. Two members of one entry with the
+	// same bytes under different extensions share a row and can name each other's
+	// key, which would otherwise delete the object the surviving row needs.
 	for _, key := range legacy {
+		if referenced, err := i.st.ContentKeyInUse(ctx, key); err != nil || referenced {
+			continue
+		}
 		if err := i.stor.Delete(ctx, key); err == nil {
 			i.stats.Migrated++
 			i.stats.Deleted++
@@ -741,6 +782,14 @@ func workRelativePath(name string) string {
 		return name
 	}
 	return path.Base(dir) + "/" + path.Base(name)
+}
+
+// IsCatalogue recognises a dump's catalogue: the V2 archive ships a SQL dump, the
+// V1 one a metadata.json. The SQL file's name differs between mirrors of the
+// dump, so the extension is what identifies it.
+func IsCatalogue(name string) bool {
+	return strings.EqualFold(path.Ext(name), ".sql") ||
+		strings.EqualFold(path.Base(name), "metadata.json")
 }
 
 // derivedIDPrefix marks an upload id subsarr made up because the archive's file

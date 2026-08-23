@@ -52,7 +52,14 @@ at it.
 				return err
 			}
 			log.Printf("[prune] keeping %s", strings.Join(keep, ", "))
-			log.Printf("[prune] %d subtitle files (%s) are outside the list", rows, humanBytes(bytes))
+			if rows > 0 && bytes == 0 {
+				// Rows migrated from the flat model carry no size: it was never
+				// recorded. They still occupy storage.
+				log.Printf("[prune] %d subtitle files are outside the list; their size is unknown "+
+					"until an import has seen them", rows)
+			} else {
+				log.Printf("[prune] %d subtitle files (%s) are outside the list", rows, humanBytes(bytes))
+			}
 
 			if dryRun {
 				log.Print("[prune] dry run: nothing was deleted")

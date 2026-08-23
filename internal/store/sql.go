@@ -419,6 +419,21 @@ func (s *sqlStore) FilesByUpload(ctx context.Context, uploadIDs []string) (map[s
 
 // ─── maintenance ─────────────────────────────────────────────────────────────
 
+// ContentKeyInUse reports whether any file still points at a storage object.
+// Content is addressed by hash and therefore shared, so this is what stands
+// between "this file moved" and deleting the object another row needs.
+func (s *sqlStore) ContentKeyInUse(ctx context.Context, key string) (bool, error) {
+	b := newBuilder(s.d)
+	b.write("SELECT 1 FROM files WHERE content_key = " + b.bind(key) + " LIMIT 1")
+
+	var one int
+	err := s.db.QueryRowContext(ctx, b.String(), b.args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // PruneScope reports how much a prune would remove, without removing anything.
 // Bytes is the size the `files` rows account for; storage reclaims slightly less
 // when several rows share one content-addressed object.
@@ -485,25 +500,61 @@ func (s *sqlStore) PruneLanguages(ctx context.Context, keep []string, batch int)
 	}
 	result.Deleted = len(ids)
 
+	orphans, err := s.unreferencedKeys(ctx, keys)
+	if err != nil {
+		return result, err
+	}
+	result.OrphanKeys = orphans
+	return result, nil
+}
+
+// unreferencedKeys returns the keys of the given set that no file points at any
+// more, in one query rather than one per key: a real prune deletes millions of
+// rows, and a round trip each would be a quarter of an hour of latency alone.
+func (s *sqlStore) unreferencedKeys(ctx context.Context, keys []string) ([]string, error) {
+	distinct := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
 		if _, dup := seen[key]; dup {
 			continue
 		}
 		seen[key] = struct{}{}
+		distinct = append(distinct, key)
+	}
+	if len(distinct) == 0 {
+		return nil, nil
+	}
 
-		q := newBuilder(s.d)
-		q.write("SELECT 1 FROM files WHERE content_key = " + q.bind(key) + " LIMIT 1")
-		var one int
-		err := s.db.QueryRowContext(ctx, q.String(), q.args...).Scan(&one)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			result.OrphanKeys = append(result.OrphanKeys, key)
-		case err != nil:
-			return result, err
+	b := newBuilder(s.d)
+	b.write("SELECT DISTINCT content_key FROM files WHERE content_key IN (")
+	b.bindList(distinct)
+	b.write(")")
+
+	rows, err := s.db.QueryContext(ctx, b.String(), b.args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	stillUsed := make(map[string]struct{}, len(distinct))
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		stillUsed[key] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var orphans []string
+	for _, key := range distinct {
+		if _, used := stillUsed[key]; !used {
+			orphans = append(orphans, key)
 		}
 	}
-	return result, nil
+	return orphans, nil
 }
 
 // writeNotKept restricts a prune to the languages outside the whitelist. An empty
@@ -537,11 +588,15 @@ const reindexBatch = 2000
 // through — because that is the only place the two sides can be made to agree:
 // no database can be asked to collapse "S.W.A.T." to "swat" the way Go can.
 func (s *sqlStore) Reindex(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM titles"); err != nil {
-		return fmt.Errorf("clear title index: %w", err)
-	}
-
-	var last string
+	// Read the whole catalogue's titles first, then replace the index in one
+	// transaction. Emptying it and refilling it page by page would answer every
+	// search with nothing for as long as the rebuild ran — and leave the index
+	// permanently half-built if the run were interrupted, which nothing would
+	// then repair, because a half-built index is not an empty one.
+	var (
+		titles []indexedTitle
+		last   string
+	)
 	for {
 		page, err := s.readTitles(ctx, last)
 		if err != nil {
@@ -551,18 +606,15 @@ func (s *sqlStore) Reindex(ctx context.Context) error {
 			break
 		}
 		last = page[len(page)-1].slug
-
-		if err := s.writeTitles(ctx, page); err != nil {
-			return err
-		}
-		if err := s.d.checkpoint(ctx, s.db); err != nil {
-			// A blocked checkpoint is not a failure; the log just stays larger.
-			_ = err
-		}
+		titles = append(titles, page...)
 	}
 
-	if err := s.d.refreshTitleIndex(ctx, s.db); err != nil {
-		return fmt.Errorf("refresh title index: %w", err)
+	if err := s.replaceTitles(ctx, titles); err != nil {
+		return err
+	}
+	if err := s.d.checkpoint(ctx, s.db); err != nil {
+		// A blocked checkpoint is not a failure; the log just stays larger.
+		_ = err
 	}
 	return s.d.analyze(ctx, s.db)
 }
@@ -598,18 +650,24 @@ func (s *sqlStore) readTitles(ctx context.Context, after string) ([]indexedTitle
 	return page, rows.Err()
 }
 
-func (s *sqlStore) writeTitles(ctx context.Context, page []indexedTitle) error {
+// replaceTitles swaps the whole index in one transaction, so a reader sees
+// either the index it had or the one being built, never neither.
+func (s *sqlStore) replaceTitles(ctx context.Context, titles []indexedTitle) error {
 	stmt := "INSERT INTO titles (slug, title, normalised) VALUES (" + s.placeholders(3) + ")" +
 		s.d.upsertSuffix([]string{"slug"}, []string{"title", "normalised"})
 
 	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM titles"); err != nil {
+			return fmt.Errorf("clear title index: %w", err)
+		}
+
 		prepared, err := tx.PrepareContext(ctx, stmt)
 		if err != nil {
 			return err
 		}
 		defer prepared.Close()
 
-		for _, t := range page {
+		for _, t := range titles {
 			normalised := title.Normalize(t.title)
 			if normalised == "" {
 				// A title that reduces to nothing cannot be searched for; the
@@ -620,7 +678,7 @@ func (s *sqlStore) writeTitles(ctx context.Context, page []indexedTitle) error {
 				return fmt.Errorf("index title %s: %w", t.slug, err)
 			}
 		}
-		return nil
+		return s.d.refreshTitleIndex(ctx, tx)
 	})
 }
 

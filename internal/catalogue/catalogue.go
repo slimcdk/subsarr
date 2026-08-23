@@ -245,8 +245,14 @@ func complete(u Upload) Upload {
 	if strings.TrimSpace(u.Title) == "" {
 		u.Title = titlepkg.FromSlug(u.Slug)
 	}
-	if u.SubsceneID == "" {
-		u.SubsceneID = SubsceneIDFromPath(u.FilePath)
+	// The dump's own `id` column is its row number — 1, 2, 3 — not the upload id
+	// Subscene used. That id is in the file's path, on every row of the real
+	// dump, and it is what an archive entry's name carries: matching an entry to
+	// its catalogue row depends on the two being the same number.
+	if id := SubsceneIDFromPath(u.FilePath); id != "" {
+		u.SubsceneID = id
+	} else if !isSubsceneID(u.SubsceneID) {
+		u.SubsceneID = ""
 	}
 	u.HI = strings.Contains(strings.ToUpper(path.Base(u.FilePath)), "_HI_")
 	u.Year = titlepkg.YearFromSlug(u.Slug)
@@ -303,6 +309,21 @@ func slugOf(raw, filePath string) string {
 	return ""
 }
 
+// isSubsceneID reports whether a value can be an upload id at all. A row number
+// looks the same, so this only rejects what is obviously not one; the path is
+// what actually decides.
+func isSubsceneID(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // SubsceneIDFromPath recovers the upload id from an archive file name of the
 // shape `<slug>_<language>-<id>.zip`.
 //
@@ -327,15 +348,11 @@ func ParseReleases(raw string) []string {
 	}
 
 	if strings.HasPrefix(raw, "[") {
-		var releases []string
-		if err := json.Unmarshal([]byte(raw), &releases); err == nil {
-			return clean(releases)
+		// Once it opens as an array it is one, and an array that holds nothing
+		// means no releases — not a release named "[]".
+		if releases, ok := decodeReleaseArray(raw); ok {
+			return releases
 		}
-		// The dump cuts a long release list off mid-array. What is left is still
-		// the uploader's release names; only the punctuation has to go, or Bazarr
-		// would score against a name beginning `["`.
-		raw = strings.Trim(raw, `[]"`)
-		raw = strings.ReplaceAll(raw, `","`, "\n")
 	}
 
 	separator := "\n"
@@ -349,6 +366,65 @@ func ParseReleases(raw string) []string {
 		separator = ","
 	}
 	return clean(strings.Split(raw, separator))
+}
+
+// decodeReleaseArray reads a JSON array of release names one element at a time.
+//
+// The dump cuts a long list off mid-array, and it writes real tab characters
+// inside the strings, which JSON does not allow. Decoding element by element
+// keeps everything up to the damage and needs no guessing at separators: a name
+// can contain a comma, and reconstructing the array by hand splits it in half.
+func decodeReleaseArray(raw string) ([]string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(escapeControl(raw)))
+	if _, err := decoder.Token(); err != nil {
+		return nil, false
+	}
+
+	var releases []string
+	for decoder.More() {
+		var name string
+		if err := decoder.Decode(&name); err != nil {
+			break // the truncated tail
+		}
+		releases = append(releases, name)
+	}
+	if len(releases) == 0 {
+		// The cut fell inside the first name. What is left of it is still the
+		// start of a release name, and it is all this row has.
+		salvaged := strings.Trim(raw, `[]" `)
+		if salvaged == "" {
+			return nil, true
+		}
+		return clean([]string{salvaged}), true
+	}
+	// A partial name after the last complete one is dropped: half a release name
+	// scores no better than none, and worse than the names that did survive.
+	return clean(releases), true
+}
+
+// escapeControl makes the dump's raw control characters legal inside a JSON
+// string, so that a tab in a release name does not cost the whole list.
+func escapeControl(s string) string {
+	if !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 }) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r < 0x20:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func clean(values []string) []string {

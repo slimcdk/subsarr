@@ -73,7 +73,7 @@ func ftsQuote(s string) string {
 
 // refreshTitleIndex fills the two virtual tables from `titles`. FTS5 has no
 // generated columns, so the copy is explicit.
-func (sqliteDialect) refreshTitleIndex(ctx context.Context, db *sql.DB) error {
+func (sqliteDialect) refreshTitleIndex(ctx context.Context, tx *sql.Tx) error {
 	stmts := []string{
 		"DELETE FROM titles_fts",
 		"INSERT INTO titles_fts (slug, normalised) SELECT slug, normalised FROM titles",
@@ -83,7 +83,7 @@ func (sqliteDialect) refreshTitleIndex(ctx context.Context, db *sql.DB) error {
 		"INSERT INTO titles_trgm(titles_trgm) VALUES('optimize')",
 	}
 	for _, stmt := range stmts {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("%s: %w", stmt, err)
 		}
 	}

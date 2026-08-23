@@ -640,3 +640,37 @@ func TestIngest_CataloguePathsRelativeToTheWork(t *testing.T) {
 		t.Errorf("title = %q, want the catalogue's", subs[0].Title)
 	}
 }
+
+// The dump's catalogue is an entry of the archive like any other, and a 953 MB
+// one. Pass one has already read it; pass two must not open it again, let alone
+// invent an upload named after it.
+func TestIngest_DoesNotIngestTheCatalogueItself(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	in := ingest.New(h.st, h.storage, ingest.Options{})
+	if _, err := in.LoadCatalogue(ctx, strings.NewReader(catalogueDump), ingest.CatalogueSQL); err != nil {
+		t.Fatal(err)
+	}
+	src := archive.MemorySource{
+		{Path: "Subscene V2/Subscene_Metadata.sql", Content: []byte(catalogueDump)},
+		{Path: "Subscene V2/links-to-subs.txt", Content: []byte("{1}{60}not a subtitle")},
+		{Path: "Subscene V2/Source.txt", Content: []byte("a note")},
+	}
+	if err := in.Run(ctx, src); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := h.st.Reindex(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := in.Stats()
+	if stats.Files != 0 {
+		t.Errorf("files = %d, want 0 — none of these entries is a subtitle upload", stats.Files)
+	}
+	for _, q := range []string{"Subscene V2", "Subscene Metadata", "links to subs", "Source"} {
+		if _, total := h.search(t, store.SearchParams{Query: q}); total != 0 {
+			t.Errorf("%q returned %d results; the archive's own files are not uploads", q, total)
+		}
+	}
+}

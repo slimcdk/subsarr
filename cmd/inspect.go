@@ -153,7 +153,7 @@ func (r *archiveReport) walk(source archive.Source) error {
 		}
 		r.extensions[ext]++
 
-		if isCatalogue(name) {
+		if ingest.IsCatalogue(name) {
 			if r.catalogueEntry == nil {
 				r.catalogueEntry = e
 				r.cataloguePosition = r.entries
@@ -291,8 +291,10 @@ func (r *archiveReport) printCatalogue(w io.Writer) {
 	fmt.Fprintf(w, "  coverage     %s carry an IMDB id, %s carry an upload id\n",
 		percent(r.withIMDB, r.catalogue.Rows), percent(r.rowsWithID, r.catalogue.Rows))
 	if r.entries > 0 {
-		fmt.Fprintf(w, "  entries      %s of the archive's entries have a catalogue row\n",
-			percent(r.catalogue.Rows, r.entries))
+		// The two counts measure different things — rows in a file, entries in an
+		// archive — so this is a ratio, not a coverage claim. Matching them one by
+		// one would mean holding every id of both in memory.
+		fmt.Fprintf(w, "  entries      %d rows for %d archive entries\n", r.catalogue.Rows, r.entries)
 	}
 
 	fmt.Fprintf(w, "\nLanguages (%d)\n", len(r.languages))

@@ -248,7 +248,7 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d d
 	scanned := 0
 	err = source.Each(func(e archive.Entry) error {
 		scanned++
-		if !isCatalogue(e.Name()) {
+		if !ingest.IsCatalogue(e.Name()) {
 			return nil
 		}
 
@@ -287,14 +287,6 @@ func loadCatalogue(ctx context.Context, in *ingest.Ingester, st store.Store, d d
 // lateCatalogue is how far into an archive the catalogue has to be before it is
 // worth telling an operator that extracting it separately would be quicker.
 const lateCatalogue = 100_000
-
-// isCatalogue recognises a dump's catalogue: the V2 archive ships a SQL dump,
-// the V1 one a metadata.json. The SQL file's name differs between mirrors, so
-// the extension is what identifies it.
-func isCatalogue(name string) bool {
-	return strings.EqualFold(path.Ext(name), ".sql") ||
-		strings.EqualFold(path.Base(name), "metadata.json")
-}
 
 func catalogueFormat(name string) ingest.CatalogueFormat {
 	if strings.EqualFold(path.Ext(name), ".json") {

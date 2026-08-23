@@ -49,8 +49,9 @@ type dialect interface {
 
 	// refreshTitleIndex brings whatever the dialect searches — a virtual table, a
 	// generated column, a full-text key — in line with the `titles` table the
-	// store has just rebuilt.
-	refreshTitleIndex(ctx context.Context, db *sql.DB) error
+	// store has just rebuilt. It runs inside the transaction that replaced it, so
+	// that a reader never sees one without the other.
+	refreshTitleIndex(ctx context.Context, tx *sql.Tx) error
 
 	// titleIndexSize reports how many titles are indexed, so a start-up check can
 	// tell an empty index from a stale one.

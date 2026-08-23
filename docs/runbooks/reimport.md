@@ -64,7 +64,7 @@ that the catalogue is found and its columns are mapped sensibly.
 
 ```bash
 docker compose -f /srv/subsarr/docker-compose.yaml run --rm subsarr \
-  inspect-archive --archive "/tmp/subscene-archive/Subscene V2.7z.001" --limit 50000
+  inspect-archive --archive "/tmp/subscene-archive/Subscene V2.7z.001" --sample 300
 ```
 
 Expect: a `.sql` catalogue, `subscene_id`, `file_path`, `title`, `imdb_id`,
@@ -83,11 +83,15 @@ Extract it once instead, and hand it to both:
 
 ```bash
 docker run --rm \
-  -v "/mnt/user/entertainment/archived/Subscene V2:/dump:ro" \
-  -v "/mnt/user/appdata/subsarr-test:/out" \
+  -v "/mnt/array/dumps/subscene:/dump:ro" \
+  -v "/mnt/cache/subsarr/db:/out" \
   alpine sh -c "apk add --no-cache p7zip >/dev/null && \
     7z e '/dump/Subscene V2.7z.001' 'Subscene V2/Subscene_Metadata.sql' -o/out"
 ```
+
+`/out` has to be the directory the service mounts as `/app/db`, or the next
+command cannot see the file. It took 17 seconds and produced 953 MB on the
+reference dump.
 
 Then check that the columns read the way they should — this touches no archive at
 all and answers in seconds:
@@ -140,8 +144,9 @@ docker compose -f /srv/subsarr/docker-compose.yaml run --rm \
     --limit 20000
 ```
 
-The final line reports the rate. Divide 2,556,800 by it for the ETA. A dry run
-(`--dry-run`) measures reading and hashing without writing anything.
+The progress lines report a rate — the final line reports only counts and a
+duration. Divide 2,556,800 by the rate for the ETA. A dry run (`--dry-run`)
+measures reading and hashing without writing anything.
 
 ---
 

@@ -140,7 +140,7 @@ Measured on the V2 dump (97 GB, all parts CRC-verified):
 | Languages | 90 requestable, ~120 present |
 | SQLite database | ~3.5 GB |
 | Free space needed to migrate an existing one | ~1× the database, plus ~1 GB |
-| Subtitle storage | ~40 GB (after deduplication; 12.9 % of the raw files are duplicates) |
+| Subtitle storage | ~250 GB (measured: 55 KB per stored file, after deduplication) |
 | Import duration | 8–12 h on a NAS |
 
 Migrating the reference installation — 4.9 million rows of the flat model — took
@@ -241,7 +241,7 @@ subsarr prune --keep-languages english,danish
 |---|---|
 | `subsarr serve` | Run the HTTP API |
 | `subsarr import-dump` | Import a dump (see `--help` for every flag) |
-| `subsarr inspect-archive` | Summarise a dump without importing it |
+| `subsarr inspect-archive` | Summarise a dump without importing it (`--sample` bounds how many entries are opened, `--skip-catalogue` answers without reading the catalogue) |
 | `subsarr prune` | Delete stored files for languages you do not keep |
 | `subsarr migrate` | Bring the schema up to date |
 | `subsarr migrate status` | Show which schema versions are applied |
@@ -257,7 +257,7 @@ Import flags worth knowing:
 | `--reload-metadata` | Re-read the catalogue even though it is already loaded |
 | `--skip-metadata` | Import file names only, for a dump with no catalogue |
 | `--catalogue PATH` | Read the catalogue from a file instead of from the archive — worth it when the dump keeps it at the end of the archive, where reaching it costs a full pass |
-| `--batch N` | Entries per transaction (default 500) |
+| `--batch N` | Entries per transaction (default 500, capped at 5000) |
 
 ---
 

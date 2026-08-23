@@ -108,7 +108,7 @@ func mysqlBooleanTerm(word string) string {
 
 // refreshTitleIndex has nothing to do: InnoDB maintains the full-text key on
 // `normalised` as rows are written.
-func (mysqlDialect) refreshTitleIndex(context.Context, *sql.DB) error { return nil }
+func (mysqlDialect) refreshTitleIndex(context.Context, *sql.Tx) error { return nil }
 
 func (mysqlDialect) titleIndexSize(ctx context.Context, db *sql.DB) (int64, error) {
 	var n int64

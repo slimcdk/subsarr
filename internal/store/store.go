@@ -127,6 +127,7 @@ type Store interface {
 	CatalogueLanguages(ctx context.Context) ([]string, error)
 
 	// Maintenance.
+	ContentKeyInUse(ctx context.Context, key string) (bool, error)
 	PruneScope(ctx context.Context, keep []string) (rows int64, bytes int64, err error)
 	PruneLanguages(ctx context.Context, keep []string, batch int) (PruneBatch, error)
 	Reindex(ctx context.Context) error

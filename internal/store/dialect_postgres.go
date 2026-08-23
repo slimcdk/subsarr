@@ -52,7 +52,7 @@ func (postgresDialect) titleJoin(b *builder, mode matchMode, query string) (stri
 
 // refreshTitleIndex has nothing to do: the searched column is generated from
 // `normalised` and the GIN index follows it.
-func (postgresDialect) refreshTitleIndex(context.Context, *sql.DB) error { return nil }
+func (postgresDialect) refreshTitleIndex(context.Context, *sql.Tx) error { return nil }
 
 func (postgresDialect) titleIndexSize(ctx context.Context, db *sql.DB) (int64, error) {
 	var n int64

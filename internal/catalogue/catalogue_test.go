@@ -378,3 +378,62 @@ func TestRead_TheRealDumpsShape(t *testing.T) {
 		t.Errorf("slug = %q", rows[2].Slug)
 	}
 }
+
+// The dump's `id` column is its own row number. The upload id Subscene used — the
+// one an archive entry's name carries, and the only thing the two can be matched
+// on — is in the file's path.
+func TestRead_TheUploadIdComesFromThePathNotTheRowNumber(t *testing.T) {
+	source := "CREATE TABLE `all_subs` (`id` int, `title` text, `lang` text, `subscene_link` text, `fileLink` text);\n" +
+		"INSERT INTO `all_subs` VALUES " +
+		"(4,'1 Buck','indonesian','1-buck/indonesian/1669883','1-buck/1-buck_indonesian-1669883.zip')," +
+		"(5,'No id in the path','danish','x/danish/1','no-id/no-id_danish.zip');\n"
+
+	rows, _ := readAll(t, source)
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows", len(rows))
+	}
+	if rows[0].SubsceneID != "1669883" {
+		t.Errorf("subscene id = %q, want 1669883 — the row number is 4", rows[0].SubsceneID)
+	}
+	if rows[1].SubsceneID != "5" {
+		t.Errorf("subscene id = %q; with no id in the path the row's own number is all there is", rows[1].SubsceneID)
+	}
+}
+
+// The dump writes `", "` between release names, real tabs inside them, and cuts
+// long lists off mid-array. Reconstructing the array by hand splits a name that
+// contains a comma; decoding it element by element does not.
+func TestParseReleases_TheDumpsRealShapes(t *testing.T) {
+	tests := []struct {
+		what string
+		in   string
+		want []string
+	}{
+		{"comma space", `["A", "B"]`, []string{"A", "B"}},
+		{"a comma inside a name", `["EP:683.10-Year Anniversary, Off to Cuba"]`,
+			[]string{"EP:683.10-Year Anniversary, Off to Cuba"}},
+		{"a tab inside a name", "[\"Lingaa\tNEXT\"]", []string{"Lingaa\tNEXT"}},
+		{"cut after two complete names", `["2.Guns.2013.720p.BluRay.x264-SPARKS", "2.Guns.2013.BDRip.X264-SPARKS", "2.Guns.2013.1080p.Blu`,
+			[]string{"2.Guns.2013.720p.BluRay.x264-SPARKS", "2.Guns.2013.BDRip.X264-SPARKS"}},
+		{"cut inside the first name", `["0.0 Mhz.720p.Web-DL`, []string{"0.0 Mhz.720p.Web-DL"}},
+		{"empty array", `[]`, nil},
+	}
+	for _, tc := range tests {
+		got := ParseReleases(tc.in)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: got %q, want %q", tc.what, got, tc.want)
+			continue
+		}
+		for i := range tc.want {
+			if got[i] != tc.want[i] {
+				t.Errorf("%s: got %q, want %q", tc.what, got, tc.want)
+				break
+			}
+		}
+		for _, name := range got {
+			if strings.ContainsAny(name, `"[]`) {
+				t.Errorf("%s: %q still carries JSON punctuation", tc.what, name)
+			}
+		}
+	}
+}
